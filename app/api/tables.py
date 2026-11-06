@@ -79,6 +79,23 @@ def rename_table(table_id: int, body: TableIn, db: Session = Depends(get_session
     return row
 
 
+@router.post("/{table_id}/clear")
+def clear_table(table_id: int, db: Session = Depends(get_session)):
+    """清空数据表内全部岗位(表本身保留;默认表也可清空)。"""
+    row = db.get(JobTable, table_id)
+    if not row:
+        raise HTTPException(404, "数据表不存在")
+    q = db.query(Job)
+    if table_id == DEFAULT_TABLE[0]:
+        q = q.filter(or_(Job.table_id == 1, Job.table_id.is_(None)))
+    else:
+        q = q.filter(Job.table_id == table_id)
+    n = q.count()
+    q.delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted": n}
+
+
 @router.delete("/{table_id}")
 def delete_table(table_id: int, db: Session = Depends(get_session)):
     """删除数据表;其下岗位自动归入默认表。默认表不可删除。"""
