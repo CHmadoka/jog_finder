@@ -52,6 +52,79 @@ def parse_salary_months(salary: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def parse_salary_k(salary: str) -> tuple[float, float] | None:
+    """把薪资文本解析为 (最低K, 最高K)/月;无法解析返回 None。
+
+    支持:"15-25K·16薪" / "1.5-2.5万" / "20K" / "2万-3万" / "30-60万/年"(折算到月)。
+    日薪("元/天")与"面议"等无法换算为月薪的文本返回 None。
+    """
+    s = (salary or "").strip().replace(",", "")
+    if not s or "面议" in s:
+        return None
+    # 年薪折算到月(取近似值,仅用于范围过滤)
+    m = re.search(r"([\d.]+)\s*[-~至]\s*([\d.]+)\s*万\s*[/每]\s*年", s)
+    if m:
+        lo, hi = float(m.group(1)), float(m.group(2))
+        return (lo * 10 / 12, hi * 10 / 12)
+    m = re.search(r"([\d.]+)\s*[-~至]\s*([\d.]+)\s*(万|千|[kK])", s)
+    if m:
+        unit = 10 if m.group(3) == "万" else 1
+        lo, hi = float(m.group(1)), float(m.group(2))
+        if lo > hi:
+            lo, hi = hi, lo
+        return (lo * unit, hi * unit)
+    m = re.search(r"([\d.]+)\s*(万|千|[kK])", s)
+    if m:
+        v = float(m.group(1)) * (10 if m.group(2) == "万" else 1)
+        return (v, v)
+    return None
+
+
+def parse_salary_range(text: str) -> tuple[float | None, float | None] | None:
+    """解析配置的薪资范围字符串,单边可缺省。
+
+    分隔符宽容:支持 "," "-" "~" "～" "，"(存储保留用户输入原文,仅比较时解析)。
+    返回 (min, max),单位 K/月;无法解析返回 None。
+    """
+    s = (text or "").strip()
+    if not s:
+        return None
+    parts = re.split(r"[,，\-~～]", s)
+    try:
+        if len(parts) == 1 and parts[0].strip():   # 单个数字 = 仅有下限
+            return (float(parts[0]), None)
+        if len(parts) != 2:
+            return None
+        lo = float(parts[0]) if parts[0].strip() else None
+        hi = float(parts[1]) if parts[1].strip() else None
+    except ValueError:
+        return None
+    if lo is None and hi is None:
+        return None
+    if lo is not None and hi is not None and lo > hi:
+        lo, hi = hi, lo
+    return (lo, hi)
+
+
+def salary_in_range(salary: str, rng: str) -> bool | None:
+    """判断岗位薪资与配置范围是否有交集。None=任一侧无法解析(不过滤)。
+
+    有交集(部分重叠也算)返回 True,完全在范围外返回 False。
+    """
+    cfg = parse_salary_range(rng)
+    if cfg is None:
+        return None
+    job = parse_salary_k(salary)
+    if job is None:
+        return None
+    lo, hi = cfg
+    if lo is not None and job[1] < lo:
+        return False
+    if hi is not None and job[0] > hi:
+        return False
+    return True
+
+
 async def read_window_global(page, names: list[str]):
     """依次尝试读取 window 上的 SSR 全局变量,返回第一个非空的。"""
     for name in names:

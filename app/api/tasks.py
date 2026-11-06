@@ -28,7 +28,7 @@ def list_platforms(db: Session = Depends(get_session)):
 async def start_task(body: dict, db: Session = Depends(get_session)):
     """启动抓取任务。
 
-    body: {platform, filter_id?, gear_id?, keyword?, city?, max_pages?, all_keywords?}
+    body: {platform, filter_id?, gear_id?, keyword?, city?, salary?, table_id?, max_pages?, all_keywords?}
     条件优先级:filter_id > gear_id > keyword
     """
     platform = body.get("platform")
@@ -41,6 +41,8 @@ async def start_task(body: dict, db: Session = Depends(get_session)):
             gear_id=body.get("gear_id"),
             keyword=body.get("keyword"),
             city=body.get("city"),
+            salary=body.get("salary"),
+            table_id=body.get("table_id"),
             max_pages=body.get("max_pages"),
             all_keywords=bool(body.get("all_keywords", True)),
         )

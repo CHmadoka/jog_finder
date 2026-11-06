@@ -22,7 +22,7 @@ from ..config import config
 from ..utils import active_estimate_from_text, human_delay, human_scroll, save_snapshot
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
-from .common import parse_salary_months
+from .common import parse_salary_months, salary_in_range
 from .selectors import BOSS
 
 logger = logging.getLogger(__name__)
@@ -274,11 +274,17 @@ class BossPlatform(BasePlatform):
         )
 
     # ---------- 列表(接口直连) ----------
-    def _draft_from_api(self, x: dict, map_: dict, city: str) -> JobDraft | None:
+    def _draft_from_api(self, x: dict, map_: dict, city: str) -> tuple[JobDraft | None, list[str]]:
+        """解析单条列表数据 → (draft, 警告列表)。draft 为 None 表示条目不可用。"""
+        warns: list[str] = []
         title = decode_text(x.get("jobName") or "", map_)
         jid = str(x.get("id") or "")
         if not title or not jid:
-            return None
+            if not jid:
+                warns.append("列表条目缺少 encryptJobId,该岗位无法入库(平台接口可能已改版)")
+            if not title:
+                warns.append("列表条目缺少 jobName(职位名),该岗位已跳过(平台接口可能已改版)")
+            return None, warns
         labels = x.get("jobLabels") or []
         labels = [decode_text(t, map_) for t in labels if t]
         salary = decode_text(x.get("salaryDesc") or "", map_)
@@ -287,7 +293,6 @@ class BossPlatform(BasePlatform):
         welfare = [decode_text(w, map_) for w in (x.get("welfareList") or []) if w]
         active = "在线" if x.get("bossOnline") else ""
         # 字段缺失警告:平台接口/文本变化时在左下角异常面板持久提示
-        warns: list[str] = []
         if "bossOnline" not in x:
             warns.append("列表接口未返回 bossOnline 字段,HR在线状态无法判定(平台可能已改版)")
         url = f"https://www.zhipin.com/job_detail/{jid}.html"
@@ -322,7 +327,7 @@ class BossPlatform(BasePlatform):
                 "labels": labels,
                 "_warnings": warns,
             },
-        )
+        ), warns
 
     # ---------- 详情 ----------
     async def _parse_detail(self, page: Page, draft: JobDraft) -> None:
@@ -422,6 +427,9 @@ class BossPlatform(BasePlatform):
                     draft.hr_title = m2.group(1)[:30]
         except Exception as exc:  # noqa: BLE001
             logger.debug("Boss 详情解析失败: %s", exc)
+            draft.raw.setdefault("_warnings", []).append(
+                f"详情页数据提取异常,部分字段未写入: {type(exc).__name__}: {str(exc)[:120]}"
+            )
             if draft.url:
                 try:
                     save_snapshot("boss", "detail_parse_fail", (await page.content())[:200000])
@@ -471,12 +479,14 @@ class BossPlatform(BasePlatform):
         detail_page: Page | None = None,
         progress=None,
         skip_check=None,
+        warn=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
         # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
         # (预创建会立刻弹出一个空白标签页,且纯查重场景下全程空白)
         dp = detail_page
         city_code = BOSS["city_codes"].get(city, "") if city else ""
+        sal_rng = (extras or {}).get("salary") or ""
         try:
             # 页面仅作为 cookie 载体,保持静止:列表数据全部走页内接口 fetch,
             # 不导航到搜索结果页(Boss 搜索页自身轮询 + 我们的 fetch 叠加易触发风控)
@@ -515,7 +525,12 @@ class BossPlatform(BasePlatform):
                     res = await self._fetch_joblist(page, keyword, city_code, page_num)
                 fresh = []
                 for x in res.get("list") or []:
-                    draft = self._draft_from_api(x, map_, city)
+                    draft, warns = self._draft_from_api(x, map_, city)
+                    if warns and warn is not None:
+                        # 条目级字段异常(缺ID/缺标题等):上报异常面板(带跳转链接)
+                        jid0 = str(x.get("id") or "")
+                        u0 = f"https://www.zhipin.com/job_detail/{jid0}.html" if jid0 else ""
+                        await warn([f"Boss列表字段异常: {w}" for w in warns], u0)
                     if draft and draft.platform_job_id not in seen:
                         seen.add(draft.platform_job_id)
                         fresh.append(draft)
@@ -525,7 +540,14 @@ class BossPlatform(BasePlatform):
                     break
                 if progress:
                     progress(f"第 {page_num} 页取得 {len(fresh)} 个岗位")
+                sal_filtered = 0
                 for draft in fresh:
+                    # 薪资范围过滤:列表阶段直接排除,不打开详情页(解析失败不误杀)
+                    if sal_rng and draft.salary:
+                        in_rng = salary_in_range(draft.salary, sal_rng)
+                        if in_rng is False:
+                            sal_filtered += 1
+                            continue
                     # 详情前查重:已入库岗位不再打开详情页(避免重复访问触发风控)
                     if skip_check and await skip_check(draft.platform_job_id):
                         skipped_known += 1
@@ -537,6 +559,8 @@ class BossPlatform(BasePlatform):
                         dp = await page.context.new_page()
                     await self._parse_detail(dp, draft)
                     yield draft
+                if sal_filtered and progress:
+                    progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")
                 if not res.get("hasMore", True):
                     break
         finally:

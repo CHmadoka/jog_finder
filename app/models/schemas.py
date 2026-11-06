@@ -50,6 +50,10 @@ class TaskOut(BaseModel):
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     filter_snapshot: dict[str, Any] = Field(default_factory=dict)
+    keywords: str = ""            # 全部岗位匹配词条(以|分隔)
+    city: str = ""
+    salary_range: str = ""        # 薪资范围原文(如 10-20 / 10, / ,20)
+    skip_stats: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         from_attributes = True
@@ -88,6 +92,8 @@ class JobOut(BaseModel):
     fit_score: Optional[float] = None
     first_seen_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    crawl_task_id: Optional[int] = None      # 产生/最后更新本岗位的抓取任务
+    table_id: Optional[int] = None           # 所属数据表(空=默认表)
 
     class Config:
         from_attributes = True
@@ -96,6 +102,22 @@ class JobOut(BaseModel):
 class JobPage(BaseModel):
     total: int
     items: list[JobOut]
+
+
+class TableIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    slug: str = Field(default="", max_length=100)
+
+
+class TableOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    created_at: Optional[datetime] = None
+    job_count: int = 0
+
+    class Config:
+        from_attributes = True
 
 
 class StartTaskIn(BaseModel):

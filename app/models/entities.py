@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from sqlalchemy.orm import DeclarativeBase
 
@@ -15,6 +15,17 @@ class Base(DeclarativeBase):
 def now_local() -> datetime:
     """本地时间(单机工具统一使用本地时区,与活跃估算/页面解析的 now 一致)。"""
     return datetime.now()
+
+
+class JobTable(Base):
+    """数据表(岗位分组容器):id + 表名 + 标识符。id=1 为默认表,不可删除。"""
+
+    __tablename__ = "job_table"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True, comment="表名")
+    slug = Column(String(100), nullable=False, unique=True, comment="标识符")
+    created_at = Column(DateTime, default=now_local)
 
 
 class Gear(Base):
@@ -75,6 +86,14 @@ class Job(Base):
     url = Column(String(500), default="")
     gear_id = Column(Integer, nullable=True, comment="命中的档位")
     keyword = Column(String(200), default="", comment="抓取时使用的搜索词")
+    crawl_task_id = Column(
+        Integer, ForeignKey("crawl_task.id"), nullable=True,
+        comment="产生/最后更新本岗位的抓取任务(外键)",
+    )
+    table_id = Column(
+        Integer, ForeignKey("job_table.id"), nullable=True,
+        comment="所属数据表(空=默认表)",
+    )
     industry = Column(String(100), default="", comment="公司行业")
     company_stage = Column(String(50), default="", comment="融资阶段")
     company_scale = Column(String(50), default="", comment="公司规模")
@@ -95,13 +114,18 @@ class CrawlTask(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(20), nullable=False, index=True)
     filter_snapshot = Column(JSON, default=dict, comment="任务使用的条件快照")
+    # 条件专用列(便于按抓取记录查询;快照保留完整明细)
+    keywords = Column(Text, default="", comment="全部岗位匹配词条(以|分隔)")
+    city = Column(String(50), default="", comment="抓取城市")
+    salary_range = Column(String(50), default="", comment="薪资范围(存用户输入原文,如 10-20 / 10, / ,20;单位K/月,单边可缺省)")
     status = Column(String(20), default="running", comment="running/done/stopped/error")
     message = Column(Text, default="", comment="结束原因或错误信息")
     found = Column(Integer, default=0, comment="发现岗位数")
     saved = Column(Integer, default=0, comment="新入库数")
     skipped = Column(Integer, default=0, comment="因活跃度/查重跳过数")
+    skip_stats = Column(JSON, default=dict, comment="跳过原因统计 {原因: 数量}")
     started_at = Column(DateTime, default=now_local)
-    finished_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True, comment="完成时间(为空=意外中断或中止,仅 done 时写入)")
 
 
 class AppEvent(Base):
@@ -113,4 +137,5 @@ class AppEvent(Base):
     platform = Column(String(20), default="", index=True, comment="boss/job51/liepin/空=全局")
     level = Column(String(10), default="warn", comment="warn/error")
     message = Column(Text, default="", comment="异常描述")
+    url = Column(String(500), default="", comment="相关岗位/页面链接(点击跳转)")
     created_at = Column(DateTime, default=now_local, index=True)

@@ -17,7 +17,7 @@ _COLS = [
     ("salary", "薪资"), ("city", "城市"), ("district", "区域"),
     ("experience", "经验"), ("education", "学历"),
     ("hr_name", "HR"), ("hr_active_at", "HR活跃时间"),
-    ("published_at", "发布时间"), ("first_seen_at", "入库时间"),
+    ("published_at", "发布时间"), ("updated_at", "最后更新时间"),
     ("url", "链接"), ("remark", "备注(不符合原因)"),
     ("description", "职位描述"),
 ]
@@ -25,7 +25,7 @@ _COLS = [
 
 @router.get("")
 def export_jobs(platform: str | None = None, db: Session = Depends(get_session)):
-    query = db.query(Job).order_by(Job.first_seen_at.desc())
+    query = db.query(Job).order_by(Job.updated_at.desc())
     if platform:
         query = query.filter(Job.platform == platform)
     rows = query.all()

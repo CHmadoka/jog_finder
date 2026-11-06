@@ -29,6 +29,7 @@ def _filtered_query(
     has_remark: int | None,
     q: str | None,
     hr_online: int | None = None,
+    table_id: int | None = None,
 ):
     """按筛选参数构造查询(fit 除外,供统计接口复用)。"""
     query = db.query(Job)
@@ -42,41 +43,70 @@ def _filtered_query(
         query = query.filter(Job.remark != "")
     if hr_online == 1:
         query = query.filter(Job.hr_online.is_(True))
+    if table_id:
+        if table_id == 1:   # 默认表:历史数据 table_id 为空也归属默认表
+            query = query.filter(or_(Job.table_id == 1, Job.table_id.is_(None)))
+        else:
+            query = query.filter(Job.table_id == table_id)
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Job.title.like(like), Job.company.like(like)))
     return query
 
 
+def _order_cols(sort_by: str, sort_order: str) -> list:
+    """排序键。默认最后更新时间倒序;"分类排列"列以该列分组、更新时间倒序兜底。"""
+    desc = sort_order != "asc"
+    sec = Job.id.desc() if desc else Job.id.asc()
+    if sort_by == "city":
+        col = Job.city.desc() if desc else Job.city.asc()
+        return [col, Job.updated_at.desc(), sec]
+    if sort_by == "exp_edu":
+        c1 = Job.experience.desc() if desc else Job.experience.asc()
+        c2 = Job.education.desc() if desc else Job.education.asc()
+        return [c1, c2, Job.updated_at.desc(), sec]
+    if sort_by == "hr_active":
+        # 估算字符串按前缀时间可比(YYYY-MM-DD HH:MM + 方向后缀),字典序即时间序
+        col = Job.hr_active_at.desc() if desc else Job.hr_active_at.asc()
+        return [col, Job.updated_at.desc(), sec]
+    if sort_by == "published":
+        col = Job.published_at.desc() if desc else Job.published_at.asc()
+        return [col, sec]
+    # 默认/回退:最后更新时间
+    col = Job.updated_at.desc() if desc else Job.updated_at.asc()
+    return [col, sec]
+
+
 @router.get("", response_model=JobPage)
 def list_jobs(
     platform: str | None = None,
     gear_id: int | None = None,
-    fit: str | None = None,          # "1"=匹配 "0"=不匹配 "none"=未分析 空=全部
+    fit: str | None = None,          # "1"=匹配 "0"=不匹配 空=全部(未分析筛选已移除)
     city: str | None = None,
     has_remark: int | None = None,   # 1=仅看有备注
     hr_online: int | None = None,    # 1=仅看HR当前在线
     q: str | None = None,            # 标题/公司模糊搜索
+    table_id: int | None = None,     # 数据表过滤
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    order: str = Query("first_seen", pattern="^(first_seen|published|hr_active)$"),
+    sort_by: str = Query("updated", pattern="^(updated|published|hr_active|city|exp_edu)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    # 兼容旧参数 order(first_seen 等),映射到新排序
+    order: str | None = None,
     db: Session = Depends(get_session),
 ):
-    query = _filtered_query(db, platform, gear_id, fit, city, has_remark, q, hr_online)
+    if order and sort_by == "updated":
+        sort_by = {"first_seen": "updated", "published": "published", "hr_active": "hr_active"}.get(order, "updated")
+    query = _filtered_query(
+        db, platform, gear_id, fit, city, has_remark, q, hr_online, table_id
+    )
     if fit == "1":
         query = query.filter(Job.fit.is_(True))
     elif fit == "0":
         query = query.filter(Job.fit.is_(False))
-    elif fit == "none":
-        query = query.filter(Job.fit.is_(None))
     total = query.count()
-    order_col = {
-        "first_seen": Job.first_seen_at.desc(),
-        "published": Job.published_at.desc(),
-        "hr_active": Job.hr_active_at.desc(),
-    }[order]
     items = (
-        query.order_by(order_col)
+        query.order_by(*_order_cols(sort_by, sort_order))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -90,11 +120,12 @@ def jobs_stats(
     gear_id: int | None = None,
     city: str | None = None,
     has_remark: int | None = None,
+    table_id: int | None = None,
     q: str | None = None,
     db: Session = Depends(get_session),
 ):
     """当前筛选口径下的判定统计:总数/契合/不符/未析/HR在线。"""
-    base = _filtered_query(db, platform, gear_id, None, city, has_remark, q)
+    base = _filtered_query(db, platform, gear_id, None, city, has_remark, q, None, table_id)
     return {
         "total": base.count(),
         "fit": base.filter(Job.fit.is_(True)).count(),

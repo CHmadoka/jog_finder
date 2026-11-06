@@ -10,6 +10,8 @@ from playwright.async_api import Page
 
 ProgressCallback = Callable[[str], None]
 SkipCheck = Callable[[str], Awaitable[bool]]
+# 解析层异常回调: (消息列表, 相关岗位URL)。用于"字段抓取有误/未正常写入"记录到异常面板。
+WarnCallback = Callable[[list[str], str], Awaitable[None]]
 
 
 @dataclass
@@ -80,11 +82,16 @@ class BasePlatform(ABC):
         detail_page: Page | None = None,
         progress: ProgressCallback | None = None,
         skip_check: SkipCheck | None = None,
+        warn: WarnCallback | None = None,
     ) -> AsyncIterator[JobDraft]:
         """执行搜索并逐条产出岗位(自动翻页,最多 max_pages 页)。
 
         skip_check: 可选的异步回调(job_id -> bool)。返回 True 表示岗位已存在,
         适配器将跳过详情页抓取(避免对已入库岗位重复打开页面,降低风控压力)。
+        warn: 可选的异步回调((消息列表, 相关URL))。解析层发现字段缺失/接口异常时
+        上报,由调度器持久化到异常面板(带跳转链接)。
+        extras["salary"]: 可选的薪资范围 "min,max"(K/月,单边可缺省)。列表阶段
+        直接过滤范围外岗位(不打开详情页),解析失败的不误杀。
         """
 
     def describe(self) -> dict:

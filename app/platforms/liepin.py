@@ -21,8 +21,8 @@ from ..utils import (
     save_snapshot,
 )
 from . import register
-from .base import BasePlatform, JobDraft, LoginRequired
-from .common import deep_find_list, parse_salary_months, read_window_global, strip_html
+from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
+from .common import deep_find_list, parse_salary_months, read_window_global, salary_in_range, strip_html
 from .selectors import LIEPIN
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,13 @@ class LiepinPlatform(BasePlatform):
                 return False
         except Exception:
             pass
+        # 兜底:页面出现明确的未登录文案时判定未登录(登录入口选择器可能失效)
+        try:
+            body = (await page.evaluate("() => (document.body?.innerText||'').slice(0, 3000)")) or ""
+            if re.search(r"请登录|登录/注册|您好,游客|您好，游客", body):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
         return True
 
     # ---------- 搜索 ----------
@@ -85,7 +92,7 @@ class LiepinPlatform(BasePlatform):
         await page.wait_for_timeout(1500)
 
     # ---------- 列表解析 ----------
-    async def _parse_list(self, page: Page, city: str) -> list[JobDraft]:
+    async def _parse_list(self, page: Page, city: str, warn=None) -> list[JobDraft]:
         drafts: list[JobDraft] = []
         data = await read_window_global(page, LIEPIN["result_globals"])
         jobs = deep_find_list(data, LIEPIN["result_list_keys"]) if data else None
@@ -93,6 +100,14 @@ class LiepinPlatform(BasePlatform):
             for j in jobs:
                 title = j.get("title") or j.get("jobName") or j.get("name") or ""
                 if not title:
+                    # 字段异常:条目缺职位名,无法入库,记录到异常面板(带链接)
+                    if warn is not None:
+                        jid0 = str(j.get("jobId") or j.get("jobid") or j.get("id") or "")
+                        u0 = f"https://www.liepin.com/job/{jid0}.shtml" if jid0 else ""
+                        await warn(
+                            ["猎聘列表字段异常: 条目缺少职位名,该岗位已跳过(平台可能已改版)"],
+                            u0,
+                        )
                     continue
                 jid = str(j.get("jobId") or j.get("jobid") or j.get("id") or "")
                 url = j.get("jobUrl") or (f"https://www.liepin.com/job/{jid}.shtml" if jid else "")
@@ -167,6 +182,11 @@ class LiepinPlatform(BasePlatform):
         if not drafts:
             html = await page.content()
             save_snapshot("liepin", "list_empty", html[:200000])
+            if warn is not None:
+                await warn(
+                    ["猎聘列表解析出 0 个岗位(SSR数据与DOM均未命中,页面结构可能已变化)"],
+                    page.url or "",
+                )
         return drafts
 
     # ---------- 详情解析 ----------
@@ -221,6 +241,9 @@ class LiepinPlatform(BasePlatform):
         if not draft.description and draft.url:
             html = await page.content()
             save_snapshot("liepin", "detail_no_desc", html[:200000])
+            draft.raw.setdefault("_warnings", []).append(
+                "猎聘详情页未解析到职位描述(页面结构可能已变化)"
+            )
 
     # ---------- 主流程 ----------
     async def iter_jobs(
@@ -234,10 +257,12 @@ class LiepinPlatform(BasePlatform):
         detail_page: Page | None = None,
         progress=None,
         skip_check=None,
+        warn=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
         # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
         dp = detail_page
+        sal_rng = (extras or {}).get("salary") or ""
         try:
             seen: set[str] = set()
             for page_num in range(1, max(1, max_pages) + 1):

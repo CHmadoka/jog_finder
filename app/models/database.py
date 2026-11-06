@@ -39,8 +39,22 @@ _NEW_COLUMNS = {
         ("hr_online", "BOOLEAN DEFAULT 0"),
         ("hr_active_text", "VARCHAR(50) DEFAULT ''"),
         ("extra", "JSON DEFAULT '{}'"),
+        # 抓取来源外键与数据表归属(SQLite 的 ALTER 限制:带 REFERENCES 的新列默认值必须为 NULL)
+        ("crawl_task_id", "INTEGER"),
+        ("table_id", "INTEGER"),
+    ],
+    "crawl_task": [
+        ("keywords", "TEXT DEFAULT ''"),
+        ("city", "VARCHAR(50) DEFAULT ''"),
+        ("salary_range", "VARCHAR(50) DEFAULT ''"),
+        ("skip_stats", "JSON DEFAULT '{}'"),
+    ],
+    "app_event": [
+        ("url", "VARCHAR(500) DEFAULT ''"),
     ],
 }
+
+DEFAULT_TABLE = (1, "默认表", "default")
 
 
 def init_db() -> None:
@@ -48,6 +62,20 @@ def init_db() -> None:
 
     Base.metadata.create_all(engine)
     _migrate_columns()
+    _seed_default_table()
+
+
+def _seed_default_table() -> None:
+    """保证默认数据表(id=1)存在,并把未归属的岗位归入默认表。"""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        conn.execute(text(
+            "INSERT OR IGNORE INTO job_table (id, name, slug, created_at) "
+            "VALUES (:id, :name, :slug, datetime('now', 'localtime'))"
+        ), {"id": DEFAULT_TABLE[0], "name": DEFAULT_TABLE[1], "slug": DEFAULT_TABLE[2]})
+        conn.execute(text("UPDATE job SET table_id = 1 WHERE table_id IS NULL"))
+        conn.commit()
 
 
 def _migrate_columns() -> None:
@@ -77,6 +105,13 @@ def _migrate_columns() -> None:
                     f"WHERE ifnull({col}, '') != ''"
                 ))
             conn.execute(text("PRAGMA user_version = 2"))
+        # 一次性:历史任务的词条/城市从快照回填到专用列(幂等:仅填空值)
+        conn.execute(text(
+            "UPDATE crawl_task SET "
+            "keywords = ifnull(json_extract(filter_snapshot, '$.keyword'), ''), "
+            "city = ifnull(json_extract(filter_snapshot, '$.city'), '') "
+            "WHERE ifnull(keywords, '') = '' AND filter_snapshot IS NOT NULL"
+        ))
         conn.commit()
 
 

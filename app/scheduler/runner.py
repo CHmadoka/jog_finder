@@ -13,10 +13,10 @@ from sqlalchemy import or_
 from ..browser import browser_manager
 from ..config import config
 from ..filter import evaluate_job
-from ..models import AppEvent, CrawlTask, Gear, Job, SearchFilter, SessionLocal
+from ..models import AppEvent, CrawlTask, Gear, Job, JobTable, SearchFilter, SessionLocal
 from ..models import now_local
 from ..platforms import get_platform
-from ..platforms.base import AntiBot, JobDraft, LoginRequired
+from ..platforms.base import AntiBot, JobDraft, LoginRequired, WarnCallback
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +51,23 @@ def _db_load_gear(gear_id: int) -> tuple[str, list]:
         return gear.name, list(gear.keywords or [])
 
 
-def _db_create_task(platform: str, snapshot: dict) -> int:
+def _db_check_table(table_id: int) -> bool:
+    """校验目标数据表是否存在。"""
     with SessionLocal() as db:
-        row = CrawlTask(platform=platform, filter_snapshot=snapshot, status="running")
+        return db.get(JobTable, table_id) is not None
+
+
+def _db_create_task(platform: str, snapshot: dict, table_id: int | None) -> int:
+    """每次抓取都落一条任务记录,条件字段(词条/城市/薪资范围)写入专用列。"""
+    with SessionLocal() as db:
+        row = CrawlTask(
+            platform=platform,
+            filter_snapshot=snapshot,
+            keywords="|".join(snapshot.get("keywords") or []),
+            city=snapshot.get("city") or "",
+            salary_range=snapshot.get("salary") or "",
+            status="running",
+        )
         db.add(row)
         db.commit()
         return row.id
@@ -67,6 +81,7 @@ def _db_load_existing_ids(platform: str) -> set[str]:
 
 
 def _db_finish_task(task_id: int, status: str, message: str, counters: dict) -> None:
+    """写任务结果。完成时间仅在 status=done 时写入:为空即表示意外中断或中止。"""
     with SessionLocal() as db:
         row = db.get(CrawlTask, task_id)
         if row:
@@ -75,7 +90,9 @@ def _db_finish_task(task_id: int, status: str, message: str, counters: dict) -> 
             row.found = counters.get("found", 0)
             row.saved = counters.get("saved", 0)
             row.skipped = counters.get("skipped", 0)
-            row.finished_at = now_local()
+            row.skip_stats = dict(counters.get("skip_stats") or {})
+            if status == "done":
+                row.finished_at = now_local()
             db.commit()
 
 
@@ -103,10 +120,13 @@ _REFRESH_FIELDS = (
 )
 
 
-def _db_update_existing(platform: str, job_id: str, draft: JobDraft) -> int:
+def _db_update_existing(
+    platform: str, job_id: str, draft: JobDraft, task_id: int | None = None
+) -> int:
     """重复岗位:只更新有变化的字段(活跃估算/薪资/行业等),不重复入库。
 
-    返回发生变化的字段数,用于进度提示。
+    返回发生变化的字段数,用于进度提示;有变化时把 crawl_task_id 更新为
+    本次任务(外键语义:最后更新该岗位的抓取)。
     """
     with SessionLocal() as db:
         row = (
@@ -142,6 +162,8 @@ def _db_update_existing(platform: str, job_id: str, draft: JobDraft) -> int:
             row.hr_online = bool(draft.hr_online)
             changed += 1
         if changed:
+            if task_id:
+                row.crawl_task_id = task_id
             db.commit()
         return changed
 
@@ -214,9 +236,24 @@ def _db_set_open_params(job_id: int, params: dict) -> bool:
         return True
 
 
-def _db_add_events(platform: str, messages: list[str]) -> int:
-    """异常事件落库(左下角面板)。24 小时内相同消息去重,防止刷屏;返回新增条数。"""
-    if not messages:
+def _db_add_events(
+    platform: str, items: list, level: str = "warn"
+) -> int:
+    """异常事件落库(左下角面板)。
+
+    items: 消息字符串,或 {"message": ..., "url": ...}(url 供前端点击跳转)。
+    24 小时内相同消息去重,防止刷屏;返回新增条数。
+    """
+    if not items:
+        return 0
+    norm: list[tuple[str, str]] = []
+    for it in items:
+        if isinstance(it, dict):
+            norm.append((str(it.get("message") or "").strip(), str(it.get("url") or "")))
+        else:
+            norm.append((str(it or "").strip(), ""))
+    norm = [(m, u) for m, u in norm if m]
+    if not norm:
         return 0
     added = 0
     with SessionLocal() as db:
@@ -226,11 +263,10 @@ def _db_add_events(platform: str, messages: list[str]) -> int:
             .filter(AppEvent.platform == platform, AppEvent.created_at >= cutoff)
             .all()
         }
-        for msg in dict.fromkeys(messages):     # 保序去重
-            msg = str(msg or "").strip()
-            if not msg or msg in existing:
+        for msg, url in dict.fromkeys(norm):    # 保序去重(以(消息,链接)为键)
+            if msg in existing:
                 continue
-            db.add(AppEvent(platform=platform, level="warn", message=msg))
+            db.add(AppEvent(platform=platform, level=level, message=msg, url=url))
             existing.add(msg)
             added += 1
         if added:
@@ -238,7 +274,10 @@ def _db_add_events(platform: str, messages: list[str]) -> int:
     return added
 
 
-def _db_insert_job(plat_id: str, draft: JobDraft, result, keyword: str, city: str) -> None:
+def _db_insert_job(
+    plat_id: str, draft: JobDraft, result, keyword: str, city: str,
+    task_id: int | None = None, table_id: int | None = None,
+) -> None:
     with SessionLocal() as db:
         job = Job(
             platform=plat_id,
@@ -265,7 +304,10 @@ def _db_insert_job(plat_id: str, draft: JobDraft, result, keyword: str, city: st
             extra=dict(draft.open_params or {}),
             published_at=draft.published_at,
             url=draft.url,
+            gear_id=None,
             keyword=keyword,
+            crawl_task_id=task_id,
+            table_id=table_id or 1,
             remark=result.remark,
             fit=result.fit,
             fit_score=result.fit_score,
@@ -312,6 +354,8 @@ class Scheduler:
         gear_id: int | None = None,
         keyword: str | None = None,
         city: str | None = None,
+        salary: str | None = None,
+        table_id: int | None = None,
         max_pages: int | None = None,
         all_keywords: bool = True,
     ) -> int:
@@ -319,6 +363,8 @@ class Scheduler:
 
         条件来源优先级:filter_id(已存条件) > gear_id(直选档位) > keyword(临时词)。
         all_keywords=True 时跑档位的全部词条(对齐实例的多关键词批量采集)。
+        salary: 薪资范围原文(如 "10-20" / "10," / ",20",单位K/月,单边可缺省)。
+        table_id: 新岗位存入的目标数据表(空=默认表)。
         """
         if self.is_running(platform):
             raise AlreadyRunning(f"平台 {platform} 已有任务在运行(每平台仅允许一个)")
@@ -342,17 +388,27 @@ class Scheduler:
         else:
             raise ValueError("缺少搜索关键词(未选择档位/条件且未提供 keyword)")
 
+        # 薪资范围:显式传入优先,其次已存条件 extras.salary;存原文,仅比较时解析
+        sal_raw = (salary or "").strip() or str(extras.get("salary") or "").strip()
+        extras = {**extras, "salary": sal_raw}
+        # 目标数据表校验(空=默认表)
+        if table_id:
+            ok = await asyncio.to_thread(_db_check_table, table_id)
+            if not ok:
+                raise ValueError(f"数据表不存在: {table_id}")
+
         max_pages = max_pages or config.MAX_PAGES_PER_TASK
         snapshot = {
             "city": city, "keyword": "、".join(kw_list), "gear": gear_name,
             "keywords": kw_list, "extras": extras, "max_pages": max_pages,
+            "salary": sal_raw, "table_id": table_id,
         }
 
-        task_id = await asyncio.to_thread(_db_create_task, platform, snapshot)
+        task_id = await asyncio.to_thread(_db_create_task, platform, snapshot, table_id)
 
         self._stops[platform] = asyncio.Event()
         self._progress[platform] = "启动中..."
-        self._counters[platform] = {"found": 0, "saved": 0, "skipped": 0}
+        self._counters[platform] = {"found": 0, "saved": 0, "skipped": 0, "skip_stats": {}}
         self._tasks[platform] = asyncio.create_task(
             self._run(plat, task_id, snapshot), name=f"crawl-{platform}"
         )
@@ -391,11 +447,21 @@ class Scheduler:
                 message = "没有需要补全的岗位(活跃字段均已存在)"
                 progress(message)
                 return
-            progress(f"待补全 {len(jobs)} 条")
             await browser_manager.ensure()
             page = await browser_manager.get_or_open_page(
                 plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
             )
+            # 登录检查:未登录时详情页解析必然失败(字段全部写不进去),提前中止
+            if not await plat.is_logged_in(page):
+                await asyncio.to_thread(
+                    _db_add_events, platform,
+                    [{"message": f"补全任务中止:{plat.name} 未登录,请在浏览器窗口中登录后重试",
+                      "url": plat.home_url}],
+                    level="error",
+                )
+                raise LoginRequired(f"{plat.name} 未登录,请在浏览器窗口中登录后重试")
+            progress(f"{plat.name} 登录态正常,开始补全")
+            progress(f"待补全 {len(jobs)} 条")
 
             # 旧数据可能缺防重定向参数(Boss securityId/lid):裸直链通常仍能按
             # jobId 正常落地;若被平台重定向到其它岗位,_parse_detail 的
@@ -429,12 +495,14 @@ class Scheduler:
                     break
                 if draft.raw.get("offline"):
                     await asyncio.to_thread(
-                        _db_add_events, platform, [f"补全:岗位已下线,跳过: {j['title']}"]
+                        _db_add_events, platform,
+                        [{"message": f"补全:岗位已下线,跳过: {j['title']}", "url": j["url"] or plat.home_url}],
                     )
                     bad += 1
                 elif draft.raw.get("blanked"):
                     await asyncio.to_thread(
-                        _db_add_events, platform, [f"补全:详情页被反自动化拦截,跳过: {j['title']}"]
+                        _db_add_events, platform,
+                        [{"message": f"补全:详情页被反自动化拦截,跳过: {j['title']}", "url": j["url"] or plat.home_url}],
                     )
                     bad += 1
                 else:
@@ -448,11 +516,23 @@ class Scheduler:
                 message = f"补全完成:更新 {ok},未获取 {bad},共 {len(todo)} 条"
         except LoginRequired as exc:
             status, message = "error", str(exc)
+            await asyncio.to_thread(
+                _db_add_events, platform,
+                [{"message": f"补全任务异常: {message}", "url": plat.home_url}], level="error",
+            )
         except AntiBot as exc:
             status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
+            await asyncio.to_thread(
+                _db_add_events, platform,
+                [{"message": f"补全任务异常: {message}", "url": plat.home_url}], level="error",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("补全任务异常")
             status, message = "error", f"{type(exc).__name__}: {exc}"
+            await asyncio.to_thread(
+                _db_add_events, platform,
+                [{"message": f"补全任务异常: {message}", "url": plat.home_url}], level="error",
+            )
         finally:
             if dp is not None:
                 # 停在安全验证页时保留标签(验证页只替换内容不改URL,须检测页面文本),
@@ -486,12 +566,31 @@ class Scheduler:
             logger.info("%s", self._progress[platform])
 
         status, message = "done", ""
+        skip_stats: dict[str, int] = {}
+
+        def bump(reason: str) -> None:
+            skip_stats[reason] = skip_stats.get(reason, 0) + 1
+
+        async def warn_cb(msgs: list[str], url: str) -> None:
+            """适配器上报的解析层异常:持久化到异常面板(带跳转链接)。"""
+            items = [{"message": str(m), "url": url or ""} for m in msgs]
+            n = await asyncio.to_thread(_db_add_events, platform, items)
+            if n:
+                progress(f"⚠ 记录 {n} 条字段解析异常(见左下角异常面板,可点击跳转)")
+
         try:
             browser = await browser_manager.ensure()
             page = await browser_manager.get_or_open_page(
                 plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
             )
+            # 登录检查:目标平台未登录时直接中止,避免抓到残缺数据
             if not await plat.is_logged_in(page):
+                await asyncio.to_thread(
+                    _db_add_events, platform,
+                    [{"message": f"抓取中止:{plat.name} 未登录,请在浏览器窗口中登录后重试",
+                      "url": plat.home_url}],
+                    level="error",
+                )
                 raise LoginRequired(f"{plat.name} 未登录,请在浏览器窗口中登录后重试")
             progress(f"{plat.name} 登录态正常,开始抓取")
 
@@ -519,23 +618,25 @@ class Scheduler:
                     detail_page=None,
                     progress=progress,
                     skip_check=skip_known,
+                    warn=warn_cb,
                 ):
                     if stop.is_set():
                         status, message = "stopped", "用户手动停止"
                         break
                     if draft.platform_job_id in seen_ids:
                         skipped += 1
-                        counters.update(found=found, saved=saved, skipped=skipped)
+                        bump("同轮重复")
+                        counters.update(found=found, saved=saved, skipped=skipped, skip_stats=skip_stats)
                         continue
                     seen_ids.add(draft.platform_job_id)
                     found += 1
                     counters.update(found=found)
-                    outcome = await self._process_one(plat, draft, snap, progress)
+                    outcome = await self._process_one(plat, draft, snap, progress, task_id, bump)
                     if outcome == "saved":
                         saved += 1
                     else:
                         skipped += 1
-                    counters.update(saved=saved, skipped=skipped)
+                    counters.update(saved=saved, skipped=skipped, skip_stats=skip_stats)
                 if ki < len(kw_list) and not stop.is_set():
                     from ..utils import human_delay
 
@@ -543,17 +644,24 @@ class Scheduler:
             if not stop.is_set() and status == "done":
                 status = "done"
 
+            brief = f"发现 {found},新入库 {saved},跳过 {skipped}"
             if status == "done":
-                message = (
-                    f"完成:{len(kw_list)} 个词条,发现 {found},新入库 {saved},跳过 {skipped}"
-                )
+                detail = ",".join(f"{k} {v}" for k, v in skip_stats.items())
+                message = f"完成:{len(kw_list)} 个词条,{brief}" + (f"({detail})" if detail else "")
+            elif status == "stopped":
+                message = f"用户手动停止:{brief}"
         except LoginRequired as exc:
             status, message = "error", str(exc)
         except AntiBot as exc:
             status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
         except Exception as exc:  # noqa: BLE001
             logger.exception("抓取任务异常")
-            status, message = "error", f"{type(exc).__name__}: {exc}"
+            status, message = f"{type(exc).__name__}: {exc}"
+            await asyncio.to_thread(
+                _db_add_events, platform,
+                [{"message": f"任务{task_id}异常: {message}", "url": plat.home_url}],
+                level="error",
+            )
         finally:
             await asyncio.to_thread(
                 _db_finish_task, task_id, status, message, dict(counters)
@@ -563,34 +671,41 @@ class Scheduler:
             self._stops.pop(platform, None)
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)
 
-    async def _process_one(self, plat, draft: JobDraft, snap: dict, progress) -> str:
-        """查重 → 评估 → 入库。返回 'saved' 或 'skipped'。"""
-        # 适配器解析层警告(字段缺失/平台文本可能变化)持久化到异常面板
+    async def _process_one(self, plat, draft: JobDraft, snap: dict, progress, task_id: int, bump) -> str:
+        """查重 → 评估 → 入库。返回 'saved' 或 'skipped';bump 记录跳过原因。"""
+        # 适配器解析层警告(字段缺失/平台文本可能变化)持久化到异常面板(带岗位链接)
         warns = draft.raw.pop("_warnings", None) or []
         if warns:
-            n = await asyncio.to_thread(_db_add_events, plat.id, [str(w) for w in warns])
+            items = [{"message": str(w), "url": self._openable_url(plat.id, draft)} for w in warns]
+            n = await asyncio.to_thread(_db_add_events, plat.id, items)
             if n:
-                progress(f"⚠ 记录 {n} 条解析异常(见左下角异常面板)")
+                progress(f"⚠ 记录 {n} 条解析异常(见左下角异常面板,可点击跳转)")
         gear_name, keywords = snap.get("gear", ""), snap.get("keywords", [])
         # 对齐实例:详情页跳回首页/异常跳转视为岗位已下线,不入库
         if draft.raw.get("offline"):
             progress(f"跳过「{draft.title}」: 岗位已下线或链接失效")
+            bump("已下线/失效")
             return "skipped"
         # 详情页被平台反自动化清空(blank):无有效数据,不入库并记录异常
         if draft.raw.get("blanked"):
             await asyncio.to_thread(
                 _db_add_events, plat.id,
-                [f"详情页被平台反自动化拦截(空白页),本轮跳过: {draft.title}"],
+                [{"message": f"详情页被平台反自动化拦截(空白页),本轮跳过: {draft.title}",
+                  "url": self._openable_url(plat.id, draft)}],
             )
             progress(f"跳过「{draft.title}」: 详情页被平台拦截(空白页),见异常面板")
+            bump("被平台拦截")
             return "skipped"
-        exists = await asyncio.to_thread(_db_update_existing, plat.id, draft.platform_job_id, draft)
+        exists = await asyncio.to_thread(
+            _db_update_existing, plat.id, draft.platform_job_id, draft, task_id
+        )
         if exists:
             # 已存在:仅更新有变化的字段,不重复入库(需求:比对是否已存在)
             if exists > 0:
                 progress(f"已存在「{draft.title}」: 同步更新{exists}个字段")
             else:
                 progress(f"跳过「{draft.title}」: 已存在,无字段变化")
+            bump("已存在")
             return "skipped"
 
         result = await evaluate_job(
@@ -598,14 +713,29 @@ class Scheduler:
         )
         if result.dropped:
             progress(f"跳过「{draft.title}」: {result.drop_reason}")
+            bump("活跃度/新鲜度窗口")
             return "skipped"
 
         await asyncio.to_thread(
-            _db_insert_job, plat.id, draft, result, snap.get("keyword", ""), snap.get("city", "")
+            _db_insert_job, plat.id, draft, result, snap.get("keyword", ""), snap.get("city", ""),
+            task_id, snap.get("table_id"),
         )
         note = f"(备注: {result.remark})" if result.remark else ""
         progress(f"入库「{draft.title}」@{draft.company}{note}")
         return "saved"
+
+    @staticmethod
+    def _openable_url(platform: str, draft: JobDraft) -> str:
+        """构造可直接在浏览器打开的岗位链接(Boss 需携带防重定向参数)。"""
+        url = draft.url or ""
+        params = {k: v for k, v in (draft.open_params or {}).items() if v}
+        if not url:
+            return ""
+        if params:
+            from urllib.parse import urlencode
+
+            url = url + ("&" if "?" in url else "?") + urlencode(params)
+        return url
 
 
 scheduler = Scheduler()

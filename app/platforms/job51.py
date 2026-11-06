@@ -17,7 +17,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 from ..utils import human_delay, human_scroll, parse_relative_time, save_snapshot
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
-from .common import deep_find_list, parse_salary_months, strip_html
+from .common import deep_find_list, parse_salary_months, salary_in_range, strip_html
 from .selectors import JOB51
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,13 @@ class Job51Platform(BasePlatform):
                 return False
         except Exception:
             pass
+        # 兜底:页面出现明确的未登录文案时判定未登录(登录入口选择器可能失效)
+        try:
+            body = (await page.evaluate("() => (document.body?.innerText||'').slice(0, 3000)")) or ""
+            if re.search(r"请登录|Hi[,，]\s*游客|登录/注册", body):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
         return True
 
     # ---------- 搜索 ----------
@@ -98,7 +105,7 @@ class Job51Platform(BasePlatform):
                 continue
         return None
 
-    async def _parse_list(self, page: Page, city: str) -> list[JobDraft]:
+    async def _parse_list(self, page: Page, city: str, warn=None) -> list[JobDraft]:
         drafts: list[JobDraft] = []
         data = await self._extract_global(page)
         jobs = deep_find_list(data, JOB51["result_list_keys"]) if data else None
@@ -112,6 +119,12 @@ class Job51Platform(BasePlatform):
                 url = href or j.get("jobUrl") or ""
                 title = j.get("jobName") or j.get("jobTitle") or ""
                 if not title:
+                    # 字段异常:条目缺职位名,无法入库,记录到异常面板(带链接)
+                    if warn is not None:
+                        await warn(
+                            ["前程无忧列表字段异常: 条目缺少职位名(jobName),该岗位已跳过(平台可能已改版)"],
+                            str(url or ""),
+                        )
                     continue
                 area = j.get("jobAreaString") or j.get("jobArea") or ""
                 district = area.split("-")[-1].strip() if "-" in area else ""
@@ -169,6 +182,11 @@ class Job51Platform(BasePlatform):
         if not drafts:
             html = await page.content()
             save_snapshot("job51", "list_empty", html[:200000])
+            if warn is not None:
+                await warn(
+                    ["前程无忧列表解析出 0 个岗位(内嵌JSON与DOM均未命中,页面结构可能已变化)"],
+                    page.url or "",
+                )
         return drafts
 
     async def _parse_detail(self, page: Page, draft: JobDraft) -> None:
@@ -227,6 +245,9 @@ class Job51Platform(BasePlatform):
                 pass
         if not draft.description and draft.url:
             save_snapshot("job51", "detail_no_desc", html[:200000])
+            draft.raw.setdefault("_warnings", []).append(
+                "前程无忧详情页未解析到职位描述(页面结构可能已变化)"
+            )
 
     # ---------- 主流程 ----------
     async def iter_jobs(
@@ -240,10 +261,12 @@ class Job51Platform(BasePlatform):
         detail_page: Page | None = None,
         progress=None,
         skip_check=None,
+        warn=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
         # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
         dp = detail_page
+        sal_rng = (extras or {}).get("salary") or ""
         try:
             seen: set[str] = set()
             for page_num in range(1, max(1, max_pages) + 1):
@@ -257,7 +280,7 @@ class Job51Platform(BasePlatform):
                 await self._wait_list(page)
                 if "passport.51job.com" in page.url or "/login" in page.url:
                     raise LoginRequired("51job 搜索页跳转到登录页")
-                drafts = await self._parse_list(page, city)
+                drafts = await self._parse_list(page, city, warn=warn)
                 fresh = [d for d in drafts if d.platform_job_id not in seen]
                 for d in drafts:
                     seen.add(d.platform_job_id)
@@ -267,7 +290,14 @@ class Job51Platform(BasePlatform):
                     break
                 if progress:
                     progress(f"第 {page_num} 页解析出 {len(fresh)} 个岗位")
+                sal_filtered = 0
                 for draft in fresh:
+                    # 薪资范围过滤:列表阶段直接排除,不打开详情页(解析失败不误杀)
+                    if sal_rng and draft.salary:
+                        in_rng = salary_in_range(draft.salary, sal_rng)
+                        if in_rng is False:
+                            sal_filtered += 1
+                            continue
                     # 详情前查重:已入库岗位不再打开详情页
                     if skip_check and await skip_check(draft.platform_job_id):
                         yield draft
@@ -277,6 +307,8 @@ class Job51Platform(BasePlatform):
                             dp = await page.context.new_page()
                         await self._parse_detail(dp, draft)
                     yield draft
+                if sal_filtered and progress:
+                    progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")
                 if page_num < max_pages:
                     await human_scroll(page)
                     await human_delay()

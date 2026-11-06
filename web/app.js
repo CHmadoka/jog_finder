@@ -20,6 +20,7 @@ const app = createApp({
     const platforms = ref([]);
     const gears = ref([]);
     const filters = ref([]);
+    const tables = ref([]);
     const jobs = reactive({ total: 0, items: [] });
     const stats = reactive({ total: 0, fit: 0, unfit: 0, unknown: 0, online: 0 });
     const recentTasks = ref([]);
@@ -35,14 +36,17 @@ const app = createApp({
       gear_id: null,
       city: "",
       keyword: "",
+      salary: "",               // 薪资范围原文(如 10-20 / 10, / ,20;K/月)
+      table_id: 1,              // 新岗位存入的目标数据表
       max_pages: 3,
       all_keywords: true,
     });
 
     // 右栏:岗位浏览筛选(只影响"看什么",默认全部平台)
+    // 默认按最后更新时间倒序;城市/经验学历/HR活跃列可点击分类排列
     const query = reactive({
-      platform: "", gear_id: null, fit: "", city: "", q: "",
-      order: "first_seen", page: 1, page_size: 20, hr_online: null,
+      platform: "", gear_id: null, table_id: null, fit: "", city: "", q: "",
+      sort_by: "updated", sort_order: "desc", page: 1, page_size: 20,
     });
 
     const statuses = reactive({});   // platform -> { running, progress, counters }
@@ -50,13 +54,16 @@ const app = createApp({
     const showDetail = ref(false);
     const gearVisible = ref(false);
     const filterVisible = ref(false);
+    const tableVisible = ref(false);
     const events = ref([]);
     const eventsOpen = ref(false);
     const gearForm = reactive({ id: null, name: "", keywords: [] });
     const filterForm = reactive({
       id: null, platform: "boss", name: "", city: "", gear_id: null, keyword: "",
+      salary: "",
       industries_avoid: [], industries_prefer: [],
     });
+    const tableForm = reactive({ id: null, name: "", slug: "" });
     let timer = null;
 
     // ---------- 计算属性 ----------
@@ -77,6 +84,17 @@ const app = createApp({
       if (canStart.value) return "";
       if (grab.mode === "saved") return "请先选择一个已存条件";
       return "请先选择岗位档位,或填写限定词条";
+    });
+    // 表头排序指示器的受控状态(与 query.sort_by/sort_order 同步)
+    const SORT_PROP = { updated: "updated_at", published: "published_at", hr_active: "hr_active_at", city: "city", exp_edu: "experience" };
+    const sortState = computed(() => [
+      { prop: SORT_PROP[query.sort_by] || "updated_at", order: query.sort_order === "asc" ? "ascending" : "descending" },
+    ]);
+    // 跳过原因明细(运行中/结束时展示)
+    const skipTip = computed(() => {
+      const s = (currentStatus.value.counters || {}).skip_stats || {};
+      const txt = Object.entries(s).map(([k, v]) => `${k} ${v}`).join(",");
+      return txt || "";
     });
 
     // ---------- 工具 ----------
@@ -135,6 +153,7 @@ const app = createApp({
       }
     }
     async function loadGears() { gears.value = await api("/gears"); }
+    async function loadTables() { tables.value = await api("/tables"); }
     async function loadFilters() {
       if (!grab.platform) return;
       filters.value = await api(`/filters?platform=${grab.platform}`);
@@ -145,13 +164,14 @@ const app = createApp({
         const params = new URLSearchParams();
         if (query.platform) params.set("platform", query.platform);
         if (query.gear_id) params.set("gear_id", query.gear_id);
+        if (query.table_id) params.set("table_id", query.table_id);
         if (query.fit) params.set("fit", query.fit);
         if (query.city.trim()) params.set("city", query.city.trim());
         if (query.q.trim()) params.set("q", query.q.trim());
-        if (query.hr_online === 1) params.set("hr_online", 1);
         params.set("page", query.page);
         params.set("page_size", query.page_size);
-        params.set("order", query.order);
+        params.set("sort_by", query.sort_by);
+        params.set("sort_order", query.sort_order);
         const data = await api("/jobs?" + params.toString());
         jobs.total = data.total;
         jobs.items = data.items;
@@ -163,6 +183,7 @@ const app = createApp({
       const params = new URLSearchParams();
       if (query.platform) params.set("platform", query.platform);
       if (query.gear_id) params.set("gear_id", query.gear_id);
+      if (query.table_id) params.set("table_id", query.table_id);
       if (query.city.trim()) params.set("city", query.city.trim());
       if (query.q.trim()) params.set("q", query.q.trim());
       Object.assign(stats, await api("/jobs/stats?" + params.toString()));
@@ -205,13 +226,25 @@ const app = createApp({
     }
     function setFit(v) {
       query.fit = query.fit === v ? "" : v;
-      if (v) query.hr_online = null;     // 判定与在线互斥,避免筛选结果为空集
       query.page = 1;
       loadJobs();
     }
-    function toggleOnline() {
-      query.hr_online = query.hr_online === 1 ? null : 1;
-      if (query.hr_online === 1) query.fit = "";
+    // 表头点击排序:同一列再次点击切换方向;新列默认降序
+    function onSortChange({ prop, order }) {
+      const byMap = { updated_at: "updated", published_at: "published", hr_active_at: "hr_active", city: "city", experience: "exp_edu" };
+      const by = byMap[prop];
+      if (!by) return;
+      if (query.sort_by === by) {
+        query.sort_order = query.sort_order === "desc" ? "asc" : "desc";
+      } else {
+        query.sort_by = by;
+        query.sort_order = order === "ascending" ? "asc" : "desc";
+      }
+      query.page = 1;
+      loadJobs();
+    }
+    function toggleSortOrder() {
+      query.sort_order = query.sort_order === "desc" ? "asc" : "desc";
       query.page = 1;
       loadJobs();
     }
@@ -231,15 +264,20 @@ const app = createApp({
       if (!canStart.value) return;
       starting.value = true;
       try {
+        const base = {
+          platform: grab.platform,
+          salary: grab.salary.trim() || null,
+          table_id: grab.table_id || null,
+          max_pages: grab.max_pages,
+        };
         const body = grab.mode === "saved"
-          ? { platform: grab.platform, filter_id: grab.filter_id, max_pages: grab.max_pages }
+          ? { ...base, filter_id: grab.filter_id }
           : {
-              platform: grab.platform,
+              ...base,
               gear_id: grab.gear_id || null,
               city: grab.city.trim() || null,
               keyword: grab.keyword.trim() || null,
               all_keywords: grab.all_keywords,
-              max_pages: grab.max_pages,
             };
         await api("/tasks/start", { method: "POST", body });
         ElMessage.success("任务已启动");
@@ -293,6 +331,7 @@ const app = createApp({
       filterForm.city = grab.city.trim();
       filterForm.gear_id = grab.gear_id || null;
       filterForm.keyword = grab.keyword.trim();
+      filterForm.salary = grab.salary.trim();
       filterForm.industries_avoid = [];
       filterForm.industries_prefer = [];
     }
@@ -303,6 +342,7 @@ const app = createApp({
       filterForm.city = row.city || "";
       filterForm.gear_id = row.gear_id || null;
       filterForm.keyword = row.keyword || "";
+      filterForm.salary = row.extras.salary || "";
       filterForm.industries_avoid = [...(row.extras.industries_avoid || [])];
       filterForm.industries_prefer = [...(row.extras.industries_prefer || [])];
     }
@@ -320,6 +360,7 @@ const app = createApp({
         gear_id: filterForm.gear_id,
         keyword: filterForm.keyword.trim(),
         extras: {
+          salary: filterForm.salary.trim(),
           industries_avoid: filterForm.industries_avoid,
           industries_prefer: filterForm.industries_prefer,
         },
@@ -340,6 +381,37 @@ const app = createApp({
       loadFilters();
     }
 
+    // ---------- 数据表管理 ----------
+    function openTableDialog() {
+      tableVisible.value = true;
+      loadTables();
+    }
+    function resetTableForm() {
+      tableForm.id = null; tableForm.name = ""; tableForm.slug = "";
+    }
+    async function saveTable() {
+      if (!tableForm.name.trim()) return ElMessage.warning("请填写表名");
+      await api("/tables", {
+        method: tableForm.id ? "PUT" : "POST",
+        body: { name: tableForm.name.trim(), slug: tableForm.slug.trim() },
+      });
+      ElMessage.success("已保存");
+      resetTableForm();
+      loadTables();
+    }
+    async function delTable(row) {
+      await ElMessageBox.confirm(
+        `删除数据表「${row.name}」?表内 ${row.job_count || 0} 条岗位将自动归入默认表。`,
+        "删除数据表", { type: "warning" }
+      );
+      await api(`/tables/${row.id}`, { method: "DELETE" });
+      ElMessage.success("已删除");
+      if (grab.table_id === row.id) grab.table_id = 1;
+      if (query.table_id === row.id) query.table_id = null;
+      resetTableForm();
+      loadTables();
+    }
+
     // ---------- 岗位 ----------
     function openDetail(row) { currentJob.value = row; }
     async function openJob(job) {
@@ -355,8 +427,23 @@ const app = createApp({
         }
       } catch (e) {}
     }
-    async function delJob(id) {
-      await api(`/jobs/${id}`, { method: "DELETE" });
+    async function openEvent(e) {
+      // 异常面板点击跳转:在已登录浏览器中打开相关页面
+      try {
+        const r = await api(`/events/${e.id}/open`, { method: "POST", body: {} });
+        if (r.need_verify) {
+          ElMessageBox.alert(r.msg, "需要安全验证", { confirmButtonText: "知道了", type: "warning" });
+        } else {
+          ElMessage.success(r.msg || "已在已登录浏览器中打开");
+        }
+      } catch (err) {}
+    }
+    async function delJob(job) {
+      await ElMessageBox.confirm(
+        `确认删除岗位「${job.title || ""}」?`, "删除岗位",
+        { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+      );
+      await api(`/jobs/${job.id}`, { method: "DELETE" });
       ElMessage.success("已删除");
       currentJob.value = null; showDetail.value = false;
       loadJobs(); loadStats();
@@ -377,6 +464,7 @@ const app = createApp({
     function onMenu(cmd) {
       if (cmd === "gears") openGearDialog();
       else if (cmd === "filters") openFilterDialog();
+      else if (cmd === "tables") openTableDialog();
       else if (cmd === "export") exportJobs();
       else if (cmd === "refresh_active") refreshActive();
       else if (cmd === "clear") clearAll();
@@ -407,6 +495,7 @@ const app = createApp({
       }
       await loadPlatforms();
       await loadGears();
+      await loadTables();
       await loadFilters();
       await loadTasks();
       loadEvents();
@@ -418,15 +507,19 @@ const app = createApp({
 
     return {
       SearchIcon, RefreshIcon, LinkIcon, DeleteIcon,
-      platforms, gears, filters, jobs, stats, recentTasks, events, eventsOpen,
+      platforms, gears, filters, tables, jobs, stats, recentTasks, events, eventsOpen,
       grab, query, statuses, healthText, loading, starting,
-      currentJob, showDetail, gearVisible, filterVisible, gearForm, filterForm,
+      currentJob, showDetail, gearVisible, filterVisible, tableVisible,
+      gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
+      sortState, skipTip,
       platformOf, gearName, isRunning, fmtTime, fmtDate, taskTagType, taskText,
-      activeTagType, activeTip, clearEvents,
-      switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit, toggleOnline,
+      activeTagType, activeTip, clearEvents, openEvent,
+      switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
+      onSortChange, toggleSortOrder,
       openGearDialog, resetGearForm, saveGear, delGear,
       openFilterDialog, resetFilterForm, editFilter, editSelectedFilter, saveFilter, delFilter,
+      openTableDialog, resetTableForm, saveTable, delTable,
       openDetail, openJob, delJob, exportJobs, clearAll, onMenu,
     };
   },
