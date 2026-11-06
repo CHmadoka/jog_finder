@@ -16,6 +16,38 @@ const DeleteIcon = ElementPlusIconsVue.Delete;
 const SettingIcon = ElementPlusIconsVue.Setting;
 const TABLE_MEM_KEY = "jf_current_table";   // 本地记忆:上次选中的数据表
 
+// 词条/行业标签输入器:回车添加、必清空、可删除(替代 el-select allow-create,
+// 规避其创建后输入文本残留的问题)
+const KwEditor = {
+  props: {
+    modelValue: { type: Array, default: () => [] },
+    placeholder: { type: String, default: "输入后回车添加" },
+  },
+  emits: ["update:modelValue"],
+  setup(props, { emit }) {
+    const draft = Vue.ref("");
+    function add() {
+      const v = draft.value.trim();
+      draft.value = "";                       // 无论是否重复都清空输入
+      if (!v) return;
+      const next = props.modelValue.includes(v) ? props.modelValue : [...props.modelValue, v];
+      emit("update:modelValue", next);
+    }
+    function remove(i) {
+      emit("update:modelValue", props.modelValue.filter((_, idx) => idx !== i));
+    }
+    return { draft, add, remove };
+  },
+  template: `
+    <div class="kw-editor">
+      <div class="kw-tags" v-show="modelValue.length">
+        <el-tag v-for="(k, i) in modelValue" :key="k" size="small" effect="plain" closable
+                @close="remove(i)">{{ k }}</el-tag>
+      </div>
+      <el-input v-model="draft" size="small" :placeholder="placeholder" @keyup.enter="add"></el-input>
+    </div>`,
+};
+
 const app = createApp({
   setup() {
     // ---------- 状态 ----------
@@ -62,6 +94,7 @@ const app = createApp({
     const events = ref([]);
     const eventsOpen = ref(false);
     const gearForm = reactive({ id: null, name: "", keywords: [] });
+    const gearNew = reactive({ name: "", keywords: [] });   // 新建独立表单,避免与行内编辑互扰
     const filterForm = reactive({
       id: null, platform: "boss", name: "", city: "", gear_id: null, keyword: "",
       salary_min: "", salary_max: "",
@@ -344,6 +377,16 @@ const app = createApp({
     function editGear(row) {
       Object.assign(gearForm, { id: row.id, name: row.name, keywords: [...(row.keywords || [])] });
     }
+    async function createGear() {
+      if (!gearNew.name.trim()) return ElMessage.warning("请填写设置名");
+      await api("/gears", {
+        method: "POST",
+        body: { name: gearNew.name.trim(), keywords: gearNew.keywords },
+      });
+      ElMessage.success("已添加");
+      gearNew.name = ""; gearNew.keywords = [];
+      loadGears();
+    }
     async function saveGear() {
       if (!gearForm.name.trim()) return ElMessage.warning("请填写设置名");
       await api("/gears" + (gearForm.id ? `/${gearForm.id}` : ""), {
@@ -600,7 +643,7 @@ const app = createApp({
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail,
-      gearForm, filterForm, tableForm,
+      gearForm, filterForm, tableForm, gearNew,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, taskTagType, taskText,
@@ -608,7 +651,7 @@ const app = createApp({
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
       loadJobs,
       onSortChange, toggleSortOrder, onTableChange,
-      openGearDialog, resetGearForm, editGear, saveGear, delGear,
+      openGearDialog, resetGearForm, editGear, createGear, saveGear, delGear,
       openFilterDialog, resetFilterForm, editFilter, editSelectedFilter, saveFilter, delFilter,
       openTableDialog, resetTableForm, editTable, createTable, saveTable, clearTable, delTable,
       openDetail, openJob, delJob, exportJobs, onMenu,
@@ -616,6 +659,7 @@ const app = createApp({
   },
 });
 app.use(ElementPlus, { locale: ElementPlusLocaleZhCn });
+app.component("KwEditor", KwEditor);
 for (const [name, comp] of Object.entries(ElementPlusIconsVue)) {
   app.component(name, comp);
 }
