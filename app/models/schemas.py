@@ -10,7 +10,7 @@ PLATFORMS = ("boss", "job51", "liepin")
 
 
 class GearIn(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: str = Field(default="", max_length=100)   # 缺省时自动命名 新岗位设置_n
     keywords: list[str] = Field(default_factory=list)
 
 

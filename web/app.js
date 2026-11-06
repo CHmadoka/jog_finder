@@ -94,7 +94,6 @@ const app = createApp({
     const events = ref([]);
     const eventsOpen = ref(false);
     const gearForm = reactive({ id: null, name: "", keywords: [] });
-    const gearNew = reactive({ name: "", keywords: [] });   // 新建独立表单,避免与行内编辑互扰
     const filterForm = reactive({
       id: null, platform: "boss", name: "", city: "", gear_id: null, keyword: "",
       salary_min: "", salary_max: "",
@@ -378,14 +377,13 @@ const app = createApp({
       Object.assign(gearForm, { id: row.id, name: row.name, keywords: [...(row.keywords || [])] });
     }
     async function createGear() {
-      if (!gearNew.name.trim()) return ElMessage.warning("请填写设置名");
-      await api("/gears", {
-        method: "POST",
-        body: { name: gearNew.name.trim(), keywords: gearNew.keywords },
-      });
-      ElMessage.success("已添加");
-      gearNew.name = ""; gearNew.keywords = [];
-      loadGears();
+      // 参考数据表新建:先一键建项(名称缺省 → 后端自动命名「新岗位设置_n」),
+      // 再对新表项提供行内编辑框;词条可缺省(留空保存即无词条)
+      const row = await api("/gears", { method: "POST", body: { name: "", keywords: [] } });
+      ElMessage.success("已添加岗位设置");
+      await loadGears();
+      const item = gears.value.find((g) => g.id === row.id);
+      if (item) editGear(item);   // 新表项自动进入行内编辑
     }
     async function saveGear() {
       if (!gearForm.name.trim()) return ElMessage.warning("请填写设置名");
@@ -643,7 +641,7 @@ const app = createApp({
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail,
-      gearForm, filterForm, tableForm, gearNew,
+      gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, taskTagType, taskText,

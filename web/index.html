@@ -672,10 +672,8 @@
   <!-- ===================== 岗位设置管理 ===================== -->
   <el-dialog v-model="gearVisible" title="岗位设置管理" width="660px">
     <div class="dlg-formline">
-      <el-input v-model="gearNew.name" placeholder="设置名,如: Java后端" style="width:170px; flex-shrink:0"
-                @keyup.enter="createGear"></el-input>
-      <kw-editor v-model="gearNew.keywords" placeholder="岗位词条,输入后回车,如: Java / 服务端"></kw-editor>
-      <el-button type="primary" style="flex-shrink:0" @click="createGear">添加</el-button>
+      <el-button type="primary" @click="createGear"><el-icon><Plus /></el-icon>添加岗位设置</el-button>
+      <span class="muted">自动命名「新岗位设置_n」,岗位词条可缺省</span>
     </div>
     <div class="dlg-list">
       <div class="dlg-row" v-for="g in gears" :key="g.id">
