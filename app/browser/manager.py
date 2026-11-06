@@ -385,12 +385,18 @@ class BrowserManager:
 
     @staticmethod
     def _looks_like_verify(url: str, title: str) -> bool:
-        """判断落点是否为平台安全验证页(Boss 验证页会引导用户滑块后自动回跳)。"""
+        """判断落点是否为平台安全验证页(Boss 验证页会引导用户滑块后自动回跳)。
+
+        只匹配验证页路径特征与标题,不能用裸 "security"/"verify" 子串——
+        Boss 正常岗位详情 URL 携带防重定向参数 securityId,裸子串会把
+        每个正常岗位都误判为验证页。
+        """
         u = url or ""
         return (
-            "security" in u
-            or "_security_check" in u
-            or "verify" in u
+            "_security_check" in u
+            or "security-check" in u
+            or "/verify" in u
+            or "verify.html" in u
             or "安全验证" in (title or "")
             or "安全挑战" in (title or "")
         )

@@ -284,10 +284,10 @@ class Job51Platform(BasePlatform):
                 fresh = [d for d in drafts if d.platform_job_id not in seen]
                 for d in drafts:
                     seen.add(d.platform_job_id)
-                if not fresh:
-                    if progress:
-                        progress(f"第 {page_num} 页无新岗位,停止翻页")
-                    break
+                if not fresh and progress:
+                    # 不提前停止:整页重复≠结果翻完(排序微调常致页间重叠),
+                    # 持续翻到设定页数上限为止(手动/异常中断除外)
+                    progress(f"第 {page_num} 页无新岗位,继续翻页(翻完设定页数为止)")
                 if progress:
                     progress(f"第 {page_num} 页解析出 {len(fresh)} 个岗位")
                 sal_filtered = 0

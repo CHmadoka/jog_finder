@@ -28,7 +28,12 @@ from .selectors import BOSS
 logger = logging.getLogger(__name__)
 
 # 详情页/搜索页通用的验证特征(实测:标题或正文前段出现即命中)
+# 标题只认"安全验证/安全挑战":正常岗位标题可能含"验证码"(安全类岗位),
+# 不能作为验证页依据;正文特征保留全词表但要求正文足够短(真验证页仅标题+滑块)
+_VERIFY_TITLE_RE = re.compile(r"安全验证|安全挑战")
 _VERIFY_TEXT_RE = re.compile(r"安全验证|安全挑战|拖动滑块|验证码")
+# 详情页结构特征:存在这些区块即说明岗位内容正常渲染,绝非验证页
+_DETAIL_DOM_RE = ".job-sec-text, .job-banner, .job-scribe, .detail-content"
 # HR 活跃文案(实测详情页名片区)
 _ACT_RE = re.compile(
     r"(刚刚活跃|今日活跃|昨日活跃|本周活跃|近两周活跃|本月活跃|上月活跃"
@@ -250,9 +255,13 @@ class BossPlatform(BasePlatform):
             if "_security_check" in u or "security-check" in u or "/verify" in u:
                 return True
             title = await page.title()
-            text = (await page.evaluate("() => (document.body?.innerText||'').slice(0,3000)")) or ""
-            if _VERIFY_TEXT_RE.search(title or ""):
+            if _VERIFY_TITLE_RE.search(title or ""):
                 return True
+            # 详情页结构仍在 → 岗位内容正常渲染,不是验证页
+            # (验证页只替换内容不改URL,但不会伪造详情页区块 DOM)
+            if await page.query_selector(_DETAIL_DOM_RE):
+                return False
+            text = (await page.evaluate("() => (document.body?.innerText||'').slice(0,3000)")) or ""
             # 正文误报防线:正常岗位详情可能含"验证码"等词(如 AI 类岗位描述),
             # 而真验证页正文极少(仅标题+滑块)。要求内容足够短才凭文本判定。
             return bool(_VERIFY_TEXT_RE.search(text)) and len(text) < 800
@@ -532,10 +541,12 @@ class BossPlatform(BasePlatform):
                     if draft and draft.platform_job_id not in seen:
                         seen.add(draft.platform_job_id)
                         fresh.append(draft)
-                if not fresh:
-                    if progress:
-                        progress(f"第 {page_num} 页无新岗位,停止翻页")
-                    break
+                if not fresh and progress:
+                    # 不再提前停止:页与页之间常有重叠(排序微调),整页重复
+                    # 不代表结果翻完;持续翻到 hasMore=False 或设定页数上限
+                    progress(
+                        f"第 {page_num} 页 {len(res.get('list') or [])} 个岗位均与先前重复,继续翻页"
+                    )
                 if progress:
                     progress(f"第 {page_num} 页取得 {len(fresh)} 个岗位")
                 sal_filtered = 0
