@@ -16,8 +16,8 @@ python -m venv --copies .venv
 .venv\Scripts\python -m pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 :startsvc
-echo [job_finder] 正在启动服务,窗口已最小化到任务栏 job_finder-server...
-start "job_finder-server" /min ".venv\Scripts\python.exe" -m app.main
+echo [job_finder] 正在启动服务,日志输出在弹出的 job_finder-server 控制台窗口...
+start "job_finder-server" cmd /c ".venv\Scripts\python.exe -m app.main & pause"
 
 set tries=0
 :waitloop
@@ -29,12 +29,12 @@ if %tries% geq 30 goto timeout
 goto waitloop
 
 :timeout
-echo [job_finder] 服务启动超时,请查看任务栏 job_finder-server 窗口中的日志。
+echo [job_finder] 服务启动超时,请查看 job_finder-server 控制台窗口中的报错日志。
 pause
 exit /b 1
 
 :ready
-echo [job_finder] 服务就绪: %URL%
+echo [job_finder] 服务就绪: %URL%(运行日志见 job_finder-server 控制台窗口)
 start "" %URL%
 ping -n 3 127.0.0.1 >nul
 exit /b 0

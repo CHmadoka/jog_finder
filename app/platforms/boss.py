@@ -32,6 +32,7 @@ _VERIFY_TEXT_RE = re.compile(r"安全验证|安全挑战|拖动滑块|验证码"
 # HR 活跃文案(实测详情页名片区)
 _ACT_RE = re.compile(
     r"(刚刚活跃|今日活跃|昨日活跃|本周活跃|近两周活跃|本月活跃|上月活跃"
+    r"|\d+日内活跃"
     r"|三个月前活跃|半年前活跃|长期未活跃|长期本站活跃"
     r"|\d+分钟前活跃|\d+小时前活跃|\d+天前活跃|\d+个月?前活跃)"
 )
@@ -108,6 +109,7 @@ class BossPlatform(BasePlatform):
     name = "Boss直聘"
     home_url = "https://www.zhipin.com"
     home_prefix = "https://www.zhipin.com"
+    detail_url_marker = "/job_detail/"
 
     # ---------- 接口辅助 ----------
     @staticmethod
@@ -352,14 +354,26 @@ class BossPlatform(BasePlatform):
             logger.warning("Boss 详情落地页异常(视为已下线,跳过): %s -> %s", draft.title, page.url[:120])
             draft.raw["offline"] = True
             return
-        # 等详情主体出现(对齐实例 detail.mjs)
-        for _ in range(10):
-            has = await page.evaluate(
-                "() => !!(document.querySelector('.job-banner, .job-detail, .job-sec') || /职位描述|岗位职责|工作职责/.test((document.body?.innerText||'').slice(0,3000)))"
-            )
-            if has:
+        # 快轮询等活跃文案/HR名片渲染完成(免疫补丁生效后页面稳定,通常 <2s;
+        # 部分岗位 SSR 不带 HR 信息,等满上限即放弃)。0.4s 间隔抢在平台反调试
+        # 可能的清理动作之前拿到完整数据。
+        for _ in range(12):
+            try:
+                has = await page.evaluate(
+                    "() => { const t = (document.body?.innerText || '');"
+                    " return t.includes('活跃') || !!document.querySelector('.job-scribe')"
+                    " || /职位描述|岗位职责|工作职责/.test(t.slice(0, 3000)); }"
+                )
+            except Exception:  # noqa: BLE001  (导航瞬间 evaluate 可能抛错)
+                has = False
+            if has or "about:blank" in (page.url or ""):
                 break
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.4)
+        if "about:blank" in (page.url or "") or not (await page.title()).strip():
+            # 页面被平台反调试清空:免疫补丁之外的兜底检测,避免拿空数据入库
+            logger.warning("Boss 详情页被清空(反自动化拦截): %s", draft.title)
+            draft.raw["blanked"] = True
+            return
         if await self._is_verify_page(page):
             await self._wait_manual_verify(page, progress=None)
         try:
@@ -421,7 +435,9 @@ class BossPlatform(BasePlatform):
         skip_check=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
-        dp = detail_page or await page.context.new_page()
+        # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
+        # (预创建会立刻弹出一个空白标签页,且纯查重场景下全程空白)
+        dp = detail_page
         city_code = BOSS["city_codes"].get(city, "") if city else ""
         try:
             # 页面仅作为 cookie 载体,保持静止:列表数据全部走页内接口 fetch,
@@ -479,16 +495,27 @@ class BossPlatform(BasePlatform):
                             progress(f"已跳过 {skipped_known} 个已入库岗位(不重复打开详情)")
                         yield draft
                         continue
+                    if dp is None:
+                        dp = await page.context.new_page()
                     await self._parse_detail(dp, draft)
                     yield draft
                 if not res.get("hasMore", True):
                     break
         finally:
-            if own_detail:
+            if own_detail and dp is not None:
+                # 停在安全验证页时保留标签:用户完成滑块后平台会自动跳回岗位页,
+                # 无需用户再手动开页面
+                keep_verify = False
                 try:
-                    await dp.close()
-                except Exception:
+                    u = dp.url or ""
+                    keep_verify = "_security_check" in u or "security-check" in u
+                except Exception:  # noqa: BLE001
                     pass
+                if not keep_verify:
+                    try:
+                        await dp.close()
+                    except Exception:  # noqa: BLE001
+                        pass
 
 
 register(BossPlatform())

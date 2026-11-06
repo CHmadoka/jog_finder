@@ -61,6 +61,8 @@ class BasePlatform(ABC):
     name: str = ""
     home_url: str = ""
     home_prefix: str = ""
+    # 详情页 URL 特征(如 Boss 的 /job_detail/):复用载体标签时优先避开这类页面
+    detail_url_marker: str = ""
 
     @abstractmethod
     async def is_logged_in(self, page: Page) -> bool:

@@ -301,12 +301,14 @@ class Scheduler:
         status, message = "done", ""
         try:
             browser = await browser_manager.ensure()
-            page = await browser_manager.get_or_open_page(plat.home_prefix, plat.home_url)
+            page = await browser_manager.get_or_open_page(
+                plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
+            )
             if not await plat.is_logged_in(page):
                 raise LoginRequired(f"{plat.name} 未登录,请在浏览器窗口中登录后重试")
             progress(f"{plat.name} 登录态正常,开始抓取")
 
-            detail_page = await browser_manager.primary_context().new_page()
+            # 详情标签页由适配器按需懒创建(iter_jobs 内),不再预开空白标签
             found = saved = skipped = 0
             seen_ids: set[str] = set()  # 跨词条内存去重(同一岗位可能被多个词条搜出)
             # 已入库岗位集合:详情前查重用,避免重复打开已抓过的详情页(风控主因)
@@ -316,49 +318,43 @@ class Scheduler:
                 return jid in existing_ids
 
             kw_list: list[str] = snap.get("keywords") or []
-            try:
-                for ki, kw in enumerate(kw_list, start=1):
+            for ki, kw in enumerate(kw_list, start=1):
+                if stop.is_set():
+                    status, message = "stopped", "用户手动停止"
+                    break
+                progress(f"词条 {ki}/{len(kw_list)}: 「{kw}」开始")
+                async for draft in plat.iter_jobs(
+                    page,
+                    city=snap["city"],
+                    keyword=kw,
+                    extras=snap["extras"],
+                    max_pages=snap["max_pages"],
+                    detail_page=None,
+                    progress=progress,
+                    skip_check=skip_known,
+                ):
                     if stop.is_set():
                         status, message = "stopped", "用户手动停止"
                         break
-                    progress(f"词条 {ki}/{len(kw_list)}: 「{kw}」开始")
-                    async for draft in plat.iter_jobs(
-                        page,
-                        city=snap["city"],
-                        keyword=kw,
-                        extras=snap["extras"],
-                        max_pages=snap["max_pages"],
-                        detail_page=detail_page,
-                        progress=progress,
-                        skip_check=skip_known,
-                    ):
-                        if stop.is_set():
-                            status, message = "stopped", "用户手动停止"
-                            break
-                        if draft.platform_job_id in seen_ids:
-                            skipped += 1
-                            counters.update(found=found, saved=saved, skipped=skipped)
-                            continue
-                        seen_ids.add(draft.platform_job_id)
-                        found += 1
-                        counters.update(found=found)
-                        outcome = await self._process_one(plat, draft, snap, progress)
-                        if outcome == "saved":
-                            saved += 1
-                        else:
-                            skipped += 1
-                        counters.update(saved=saved, skipped=skipped)
-                    if ki < len(kw_list) and not stop.is_set():
-                        from ..utils import human_delay
+                    if draft.platform_job_id in seen_ids:
+                        skipped += 1
+                        counters.update(found=found, saved=saved, skipped=skipped)
+                        continue
+                    seen_ids.add(draft.platform_job_id)
+                    found += 1
+                    counters.update(found=found)
+                    outcome = await self._process_one(plat, draft, snap, progress)
+                    if outcome == "saved":
+                        saved += 1
+                    else:
+                        skipped += 1
+                    counters.update(saved=saved, skipped=skipped)
+                if ki < len(kw_list) and not stop.is_set():
+                    from ..utils import human_delay
 
-                        await human_delay()
-                if not stop.is_set() and status == "done":
-                    status = "done"
-            finally:
-                try:
-                    await detail_page.close()
-                except Exception:
-                    pass
+                    await human_delay()
+            if not stop.is_set() and status == "done":
+                status = "done"
 
             if status == "done":
                 message = (
@@ -392,6 +388,14 @@ class Scheduler:
         # 对齐实例:详情页跳回首页/异常跳转视为岗位已下线,不入库
         if draft.raw.get("offline"):
             progress(f"跳过「{draft.title}」: 岗位已下线或链接失效")
+            return "skipped"
+        # 详情页被平台反自动化清空(blank):无有效数据,不入库并记录异常
+        if draft.raw.get("blanked"):
+            await asyncio.to_thread(
+                _db_add_events, plat.id,
+                [f"详情页被平台反自动化拦截(空白页),本轮跳过: {draft.title}"],
+            )
+            progress(f"跳过「{draft.title}」: 详情页被平台拦截(空白页),见异常面板")
             return "skipped"
         exists = await asyncio.to_thread(_db_update_existing, plat.id, draft.platform_job_id, draft)
         if exists:

@@ -242,7 +242,8 @@ class Job51Platform(BasePlatform):
         skip_check=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
-        dp = detail_page or await page.context.new_page()
+        # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
+        dp = detail_page
         try:
             seen: set[str] = set()
             for page_num in range(1, max(1, max_pages) + 1):
@@ -272,13 +273,15 @@ class Job51Platform(BasePlatform):
                         yield draft
                         continue
                     if draft.url:
+                        if dp is None:
+                            dp = await page.context.new_page()
                         await self._parse_detail(dp, draft)
                     yield draft
                 if page_num < max_pages:
                     await human_scroll(page)
                     await human_delay()
         finally:
-            if own_detail:
+            if own_detail and dp is not None:
                 try:
                     await dp.close()
                 except Exception:

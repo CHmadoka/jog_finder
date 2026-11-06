@@ -24,6 +24,27 @@ from ..config import config
 
 logger = logging.getLogger(__name__)
 
+# Boss/招聘站反自动化免疫补丁:置空 console 全部方法。
+# 原理:平台反调试脚本(browser-check-v2 等)通过 console.table(大对象)/console.clear/
+# Date 时序等"console 副作用"检测 DevTools/CDP 客户端(Runtime.enable 使 console
+# 调用产生可序列化副作用),命中后自杀式 location='about:blank'(或 window.close
+# 关掉最后一个标签导致整个浏览器退出)——表现为"打开页面变 blank"、HR 活跃等
+# 字段解析为空。console 全部 no-op 后检测无从取材,页面可稳定存活。
+# add_init_script 在页面任何脚本(含反调试)之前执行。
+ANTIDEBUG_NEUTRALIZE_JS = """
+(() => {
+  try {
+    const noop = function () {};
+    const names = ['log','info','warn','error','debug','dir','table','clear','trace',
+                   'group','groupEnd','groupCollapsed','count','time','timeEnd','timeLog',
+                   'assert','dirxml','profile','profileEnd'];
+    for (let i = 0; i < names.length; i++) {
+      try { console[names[i]] = noop; } catch (e) {}
+    }
+  } catch (e) {}
+})();
+"""
+
 # 常见浏览器安装位置(Windows)
 _BROWSER_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -152,6 +173,10 @@ class BrowserManager:
             if await is_cdp_alive(config.CDP_PORT):
                 break
             await asyncio.sleep(probe_gap)
+        # 趁首屏还在 about:blank/加载初期,用原生 CDP 抢先注入反调试免疫
+        # (不经 Playwright,避免其 Runtime.enable 引发平台检测)。
+        # 若未赶上(文档已创建),由 _connect 里的 reload 兜底。
+        await self._inject_antidebug_native()
         if fast:
             # 打开页面不需要 Playwright 级别的 target 稳定,见到域名即可
             await wait_page_target(config.CDP_PORT, frag, 8)
@@ -162,35 +187,120 @@ class BrowserManager:
         if not await is_cdp_alive(config.CDP_PORT):
             raise TimeoutError("浏览器调试端口启动超时(30s)")
 
+    @staticmethod
+    async def _inject_antidebug_native() -> None:
+        """冷启动后立即对所有 page target 原生注入免疫补丁(不依赖 Playwright)。"""
+        base = f"http://127.0.0.1:{config.CDP_PORT}"
+        try:
+            async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+                lst = (await client.get(f"{base}/json/list")).json()
+            for t in lst:
+                if t.get("type") != "page":
+                    continue
+                ws_url = (t.get("webSocketDebuggerUrl") or "").replace("localhost", "127.0.0.1")
+                if not ws_url:
+                    continue
+                try:
+                    async with websockets.connect(ws_url, open_timeout=5) as ws:
+                        await ws.send(json.dumps({"id": 1, "method": "Page.enable"}))
+                        await ws.send(json.dumps({
+                            "id": 2,
+                            "method": "Page.addScriptToEvaluateOnNewDocument",
+                            "params": {"source": ANTIDEBUG_NEUTRALIZE_JS},
+                        }))
+                except Exception:  # noqa: BLE001
+                    logger.debug("原生免疫注入失败: %s", ws_url[:50], exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.debug("原生免疫注入枚举失败", exc_info=True)
+
     async def _connect(self) -> None:
         self._playwright = await async_playwright().start()
         try:
+            # no_defaults=True:不向页面下发 Playwright 的默认环境覆写(焦点模拟/
+            # 媒体模拟等)。焦点模拟会让 document.hasFocus() 恒为真,Boss直聘页面
+            # 的反调试脚本检测到这一异常后会自杀式关闭标签页,导致整个浏览器退出
+            # (实测:点"开始抓取"后页面变 blank、Chrome 闪退)。
             self._browser = await self._playwright.chromium.connect_over_cdp(
-                config.cdp_endpoint, timeout=15000
+                config.cdp_endpoint, timeout=15000, no_defaults=True
             )
         except Exception:
             await self._playwright.stop()
             self._playwright = None
             raise
+        # 冷启动初期 target 枚举/导航管线未就绪:contexts 可能为空(标签页尚未
+        # 挂载),等待其出现,避免后续 primary_context() 报"浏览器未连接"。
+        for _ in range(30):
+            if self._browser.contexts:
+                break
+            await asyncio.sleep(0.5)
+        if not self._browser.contexts:
+            await self._playwright.stop()
+            self._playwright = None
+            self._browser = None
+            raise RuntimeError("已连接浏览器 CDP,但未发现任何标签页(请重试)")
         # 连接初期 CDP target 枚举/导航管线未就绪,直接 goto 会"假成功"(停留 about:blank)
         await asyncio.sleep(2.0)
-        logger.info("已连接浏览器 CDP: %s", config.cdp_endpoint)
+        if not self._browser.contexts:
+            # 等待期间 context 消失:浏览器多半已被页面自杀脚本关闭
+            await self._playwright.stop()
+            self._playwright = None
+            self._browser = None
+            raise RuntimeError("浏览器在连接后退出(页面反自动化脚本自杀?),请重新拉起浏览器后重试")
+        await self._arm_antidebug(self.primary_context())
+        logger.info("已连接浏览器 CDP: %s (no_defaults=True)", config.cdp_endpoint)
+
+    @staticmethod
+    async def _arm_antidebug(ctx: BrowserContext) -> None:
+        """对 context 施加反自动化免疫。
+
+        add_init_script 只对未来加载的文档生效,因此对"已加载页面"执行一次
+        reload,使其在文档创建前获得补丁。不要对已加载页面事后 evaluate 注入——
+        运行中的反调试脚本会检测到 console 方法被改写,反而加速判定命中。
+
+        reload 是必须的:已加载页面(如首屏)没有补丁时,反调试脚本随时可能命中
+        并 window.close() 偷关标签页(命令行打开的窗口可被脚本关闭),若它是
+        唯一标签,整个浏览器随之退出——表现为"页面/浏览器无故消失"。
+        """
+        try:
+            await ctx.add_init_script(ANTIDEBUG_NEUTRALIZE_JS)
+        except Exception:  # noqa: BLE001
+            logger.debug("add_init_script 失败", exc_info=True)
+        for pg in list(ctx.pages):
+            try:
+                await pg.reload(wait_until="domcontentloaded", timeout=15000)
+            except Exception:  # noqa: BLE001
+                logger.debug("免疫 reload 失败: %s", pg.url[:60], exc_info=True)
 
     def primary_context(self) -> BrowserContext:
         if not self._browser or not self._browser.contexts:
             raise RuntimeError("浏览器未连接")
         return self._browser.contexts[0]
 
-    async def get_or_open_page(self, url_prefix: str, url: str | None = None) -> Page:
-        """按 URL 前缀复用已有 Tab,否则新开 Tab。"""
+    async def get_or_open_page(
+        self, url_prefix: str, url: str | None = None, avoid_marker: str = ""
+    ) -> Page:
+        """按 URL 前缀复用已有 Tab,否则新开 Tab。
+
+        avoid_marker:含该片段的标签页(如 Boss 岗位详情页)仅作兜底复用——
+        详情页可能被平台自动重定向,作为"静止载体页"易在抓取中途跳走。
+        """
         ctx = self.primary_context()
+        fallback: Page | None = None
         for page in ctx.pages:
             if page.url.startswith(url_prefix):
-                try:
-                    await page.bring_to_front()
-                except Exception:
-                    pass
-                return page
+                if not avoid_marker or avoid_marker not in page.url:
+                    try:
+                        await page.bring_to_front()
+                    except Exception:
+                        pass
+                    return page
+                fallback = fallback or page
+        if fallback is not None:
+            try:
+                await fallback.bring_to_front()
+            except Exception:
+                pass
+            return fallback
         page = await ctx.new_page()
         await page.goto(url or url_prefix, wait_until="domcontentloaded")
         return page
@@ -258,6 +368,7 @@ class BrowserManager:
         tid: str | None = None
         ws_url: str | None = None
         need_navigate = True
+        need_activate = False             # 仅"复用已有标签"时需要切标签;新标签天然活动
         if launched:
             # 冷启动:Chrome 首屏就是目标页(原生导航,无 blank 阶段)。
             # fast 模式下 target 的 URL 可能尚未就位,轮询等待其出现
@@ -293,6 +404,7 @@ class BrowserManager:
             if t and not launched:
                 tid = t.get("id")
                 need_navigate = False
+                need_activate = True      # 复用已有标签:切到它(用户明确重开同一岗位)
         if tid is None:
             # 浏览器已在运行(或冷启动首屏未匹配):新开标签并用 CDP 导航
             async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
@@ -347,12 +459,15 @@ class BrowserManager:
                 title = t.get("title") or ""
         except Exception:  # noqa: BLE001
             pass
-        # 把新标签带到前台(失败不影响打开)
-        try:
-            async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
-                await client.get(f"{base}/json/activate/{tid}")
-        except Exception:  # noqa: BLE001
-            pass
+        # 注意:不要调用 /json/activate —— 新开标签天然是活动标签,而 activate 由
+        # Chrome 延迟处理,会在用户已把窗口最小化后又把窗口强制拉回前台(实测)。
+        # 仅"复用已有标签"时切换,那是用户的明确预期。
+        if need_activate and tid:
+            try:
+                async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+                    await client.get(f"{base}/json/activate/{tid}")
+            except Exception:  # noqa: BLE001
+                pass
         # activate 只能切换 Chrome 窗口内的标签;把整个浏览器窗口置顶还需系统调用
         self._switch_to_window_by_title((title or "")[:24])
         # 收尾:清掉残留的空白标签(Chrome 启动初期偶发的多余 target),保持窗口整洁
