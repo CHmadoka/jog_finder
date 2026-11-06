@@ -57,6 +57,8 @@ const app = createApp({
     const gearVisible = ref(false);
     const filterVisible = ref(false);
     const tableVisible = ref(false);
+    const taskDetailVisible = ref(false);
+    const detailTask = ref(null);
     const events = ref([]);
     const eventsOpen = ref(false);
     const gearForm = reactive({ id: null, name: "", keywords: [] });
@@ -168,6 +170,11 @@ const app = createApp({
     }
     function taskText(s) {
       return { done: "完成", running: "进行中", stopped: "已停止", error: "失败" }[s] || s;
+    }
+    // 任务详情卡片
+    function showTaskDetail(t) {
+      detailTask.value = t;
+      taskDetailVisible.value = true;
     }
 
     // ---------- 数据加载 ----------
@@ -584,6 +591,7 @@ const app = createApp({
       platforms, gears, filters, tables, jobs, stats, recentTasks, events, eventsOpen,
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
+      taskDetailVisible, detailTask, showTaskDetail,
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
