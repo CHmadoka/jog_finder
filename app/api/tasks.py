@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from ..models import CrawlTask, get_session
 from ..models.schemas import PLATFORMS, TaskOut
-from ..platforms import all_platforms
+from ..platforms import all_platforms, get_platform
+from ..platforms.base import AntiBot
 from ..scheduler import AlreadyRunning, scheduler
 
 router = APIRouter(tags=["tasks"])
@@ -52,6 +53,33 @@ async def start_task(body: dict, db: Session = Depends(get_session)):
         raise HTTPException(400, str(exc)) from exc
     row = db.get(CrawlTask, task_id)
     return row
+
+
+@router.post("/tasks/check_login")
+async def check_login(body: dict):
+    """抓取前登录预检查:探测目标平台登录态。
+
+    未登录时前端直接拦截"开始抓取"并提示登录(任务级检查仍保留为兜底)。
+    """
+    platform = body.get("platform")
+    if platform not in PLATFORMS:
+        raise HTTPException(400, f"platform 必须是 {PLATFORMS}")
+    if scheduler.is_running(platform):
+        raise HTTPException(409, "该平台任务运行中,无需检查登录")
+    from ..browser import browser_manager
+
+    plat = get_platform(platform)
+    try:
+        await browser_manager.ensure()
+        page = await browser_manager.get_or_open_page(
+            plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
+        )
+        logged = await plat.is_logged_in(page)
+    except AntiBot as exc:
+        raise HTTPException(503, f"页面未能加载,无法检查登录: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"登录检测失败: {exc}") from exc
+    return {"platform": platform, "name": plat.name, "logged_in": bool(logged)}
 
 
 @router.post("/tasks/{platform}/stop")

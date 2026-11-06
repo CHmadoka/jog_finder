@@ -290,6 +290,15 @@ const app = createApp({
       }
       starting.value = true;
       try {
+        // 抓取前登录预检查:未登录直接拦下并引导登录(不走任务报错)
+        const lg = await api("/tasks/check_login", { method: "POST", body: { platform: grab.platform } });
+        if (!lg.logged_in) {
+          ElMessageBox.alert(
+            `${lg.name || platformOf(grab.platform)} 未登录:请在已打开的浏览器窗口中登录后,再点击「开始抓取」。`,
+            "未登录", { confirmButtonText: "知道了", type: "warning" }
+          );
+          return;
+        }
         const base = {
           platform: grab.platform,
           salary,
@@ -485,7 +494,9 @@ const app = createApp({
       // 经后端在已登录的抓取浏览器窗口打开(保留登录态,非系统默认浏览器)
       try {
         const r = await api(`/jobs/${job.id}/open`, { method: "POST", body: {} });
-        if (r.need_verify) {
+        if (r.need_login) {
+          ElMessageBox.alert(r.msg, "未登录", { confirmButtonText: "知道了", type: "warning" });
+        } else if (r.need_verify) {
           ElMessageBox.alert(r.msg, "需要安全验证", {
             confirmButtonText: "知道了", type: "warning",
           });
@@ -498,7 +509,9 @@ const app = createApp({
       // 异常面板点击跳转:在已登录浏览器中打开相关页面
       try {
         const r = await api(`/events/${e.id}/open`, { method: "POST", body: {} });
-        if (r.need_verify) {
+        if (r.need_login) {
+          ElMessageBox.alert(r.msg, "未登录", { confirmButtonText: "知道了", type: "warning" });
+        } else if (r.need_verify) {
           ElMessageBox.alert(r.msg, "需要安全验证", { confirmButtonText: "知道了", type: "warning" });
         } else {
           ElMessage.success(r.msg || "已在已登录浏览器中打开");

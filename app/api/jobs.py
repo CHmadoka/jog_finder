@@ -168,11 +168,18 @@ async def open_job_in_browser(job_id: int, db: Session = Depends(get_session)):
     referrer = "https://www.zhipin.com/" if job.platform == "boss" else None
 
     from ..browser import browser_manager
+    from ..scheduler import scheduler
 
     try:
         res = await browser_manager.open_url_native(url, referrer=referrer)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"在浏览器中打开失败: {exc}") from exc
+    # 落点诊断:未登录时给出"未登录"指引,而非误导性的"安全验证"
+    res = await browser_manager.diagnose_open(
+        job.platform, res, platform_busy=scheduler.is_running(job.platform)
+    )
+    if res.get("need_login"):
+        return {"ok": False, "need_login": True, "msg": res["msg"]}
     if res.get("need_verify"):
         return {
             "ok": True,

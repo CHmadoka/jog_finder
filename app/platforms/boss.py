@@ -220,28 +220,26 @@ class BossPlatform(BasePlatform):
             )
         if "/web/user/?ka=header-login" in page.url or re.search(r"login", page.url):
             return False
+        # 以页面登录 UI 为准:游客态搜索接口也可能返回 code=0,不能作为已登录依据
+        try:
+            state = await page.evaluate(
+                "() => JSON.stringify({"
+                " login: !!document.querySelector('[ka=header-login], .header-login-btn, a[href*=\"login\"]'),"
+                " avatar: !!document.querySelector('.nav-figure, .nav-figure-wrapper, [ka=header-username]')}) "
+            )
+            import json as _json
+
+            st = _json.loads(state)
+            if st.get("avatar"):
+                return True
+            if st.get("login"):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        # 页面 UI 不可判时再用接口 code 兜底
         try:
             res = await self._fetch_joblist(page, "Python", "", 1)
-            if res.get("code") == 0:
-                return True
-            # 接口拒绝 ≠ 未登录:可能被限流/风控。用页面登录 UI 二次判断
-            try:
-                state = await page.evaluate(
-                    "() => JSON.stringify({"
-                    " login: !!document.querySelector('[ka=header-login], .header-login-btn, a[href*=\"login\"]'),"
-                    " avatar: !!document.querySelector('.nav-figure, .nav-figure-wrapper, [ka=header-username]')}) "
-                )
-                import json as _json
-
-                st = _json.loads(state)
-                if st.get("avatar"):
-                    logger.info("Boss 接口 code=%s 但页面显示已登录头像 → 判定已登录(接口被限流)", res.get("code"))
-                    return True
-                if st.get("login"):
-                    return False
-            except Exception:  # noqa: BLE001
-                pass
-            return False
+            return res.get("code") == 0
         except Exception:
             return False
 

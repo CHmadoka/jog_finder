@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
@@ -393,6 +394,43 @@ class BrowserManager:
             or "安全验证" in (title or "")
             or "安全挑战" in (title or "")
         )
+
+    _LOGIN_URL_RE = re.compile(r"login|passport|/web/user/", re.I)
+
+    async def diagnose_open(self, platform_id: str, res: dict, platform_busy: bool = False) -> dict:
+        """打开落点诊断:落点疑似验证页时,先排除"未登录"——未登录时平台常把
+        页面引到登录/验证页,提示语应指向登录而非滑块验证。
+
+        - URL 含 login/passport 等特征 → 直接判"未登录"(零导航,任务运行中也可用);
+        - 其余情况且平台空闲 → 用适配器登录探测二次确认(会访问平台首页);
+        - 平台任务运行中不做导航式探测(避免打断载体页),维持原验证提示。
+        """
+        if not res.get("need_verify"):
+            return res
+        final_url = res.get("url") or ""
+        if self._LOGIN_URL_RE.search(final_url):
+            return {**res, "need_verify": False, "need_login": True,
+                    "msg": "该页面被引导到登录页:当前浏览器尚未登录该平台,"
+                           "请先在浏览器中登录后再打开。"}
+        if platform_busy:
+            return res
+        from ..platforms import get_platform
+
+        try:
+            plat = get_platform(platform_id)
+        except Exception:  # noqa: BLE001
+            return res
+        try:
+            await self.ensure()
+            page = await self.get_or_open_page(
+                plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
+            )
+            if not await plat.is_logged_in(page):
+                return {**res, "need_verify": False, "need_login": True,
+                        "msg": f"{plat.name} 未登录:请先在浏览器中登录 {plat.name},再打开岗位页面。"}
+        except Exception:  # noqa: BLE001
+            pass
+        return res
 
     @staticmethod
     def _switch_to_window_by_title(fragment: str) -> bool:

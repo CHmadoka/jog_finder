@@ -42,11 +42,17 @@ async def open_event(event_id: int, db: Session = Depends(get_session)):
         raise HTTPException(400, "该异常没有可跳转的链接")
     referrer = "https://www.zhipin.com/" if ev.platform == "boss" else None
     from ..browser import browser_manager
+    from ..scheduler import scheduler
 
     try:
         res = await browser_manager.open_url_native(ev.url, referrer=referrer)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"在浏览器中打开失败: {exc}") from exc
+    res = await browser_manager.diagnose_open(
+        ev.platform, res, platform_busy=scheduler.is_running(ev.platform) if ev.platform else False
+    )
+    if res.get("need_login"):
+        return {"ok": False, "need_login": True, "msg": res["msg"]}
     if res.get("need_verify"):
         return {
             "ok": True,
