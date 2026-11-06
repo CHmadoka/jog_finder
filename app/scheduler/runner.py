@@ -8,6 +8,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
+from sqlalchemy import or_
+
 from ..browser import browser_manager
 from ..config import config
 from ..filter import evaluate_job
@@ -142,6 +144,74 @@ def _db_update_existing(platform: str, job_id: str, draft: JobDraft) -> int:
         if changed:
             db.commit()
         return changed
+
+
+def _db_load_missing_active(platform: str) -> list[dict]:
+    """加载活跃字段缺失的岗位(旧数据修复对象)。"""
+    with SessionLocal() as db:
+        rows = (
+            db.query(Job)
+            .filter(
+                Job.platform == platform,
+                or_(Job.hr_active_at.is_(None), Job.hr_active_at == ""),
+            )
+            .order_by(Job.id)
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "platform_job_id": r.platform_job_id,
+                "title": r.title or "",
+                "url": r.url or "",
+                "extra": dict(r.extra or {}),
+                "keyword": r.keyword or "",
+            }
+            for r in rows
+        ]
+
+
+def _db_refresh_job_active(job_id: int, draft: JobDraft) -> int:
+    """旧数据修复:把详情解析出的活跃/描述回写岗位行(仅补空/更新),返回变更字段数。"""
+    with SessionLocal() as db:
+        row = db.get(Job, job_id)
+        if not row:
+            return 0
+        changed = 0
+        if draft.hr_active_at and draft.hr_active_at != (row.hr_active_at or ""):
+            row.hr_active_at = draft.hr_active_at[:32]
+            changed += 1
+        if draft.hr_active_text and draft.hr_active_text != (row.hr_active_text or ""):
+            row.hr_active_text = draft.hr_active_text[:50]
+            changed += 1
+        if not (row.description or "").strip() and (draft.description or "").strip():
+            row.description = draft.description
+            changed += 1
+        if draft.open_params:
+            merged = dict(row.extra or {})
+            before = dict(merged)
+            merged.update({k: v for k, v in draft.open_params.items() if v})
+            if merged != before:
+                row.extra = merged
+                changed += 1
+        if changed:
+            db.commit()
+        return changed
+
+
+def _db_set_open_params(job_id: int, params: dict) -> bool:
+    """回写重建的防重定向参数(Boss securityId/lid 等)。返回是否有变化。"""
+    with SessionLocal() as db:
+        row = db.get(Job, job_id)
+        if not row:
+            return False
+        merged = dict(row.extra or {})
+        merged.update({k: v for k, v in (params or {}).items() if v})
+        if merged == dict(row.extra or {}):
+            return False
+        row.extra = merged
+        db.commit()
+        return True
 
 
 def _db_add_events(platform: str, messages: list[str]) -> int:
@@ -287,6 +357,123 @@ class Scheduler:
             self._run(plat, task_id, snapshot), name=f"crawl-{platform}"
         )
         return task_id
+
+    # ---------- 旧数据修复:补全 HR 活跃 ----------
+    async def start_refresh(self, platform: str) -> None:
+        """启动"补全活跃"任务:对 hr_active_at 为空的旧岗位重新解析详情页并回写。
+
+        与抓取任务共用每平台互斥与进度面板;不产生 crawl_task 记录。
+        """
+        if self.is_running(platform):
+            raise AlreadyRunning(f"平台 {platform} 已有任务在运行(每平台仅允许一个)")
+        plat = get_platform(platform)
+        self._stops[platform] = asyncio.Event()
+        self._progress[platform] = "补全启动中..."
+        self._counters[platform] = {"found": 0, "saved": 0, "skipped": 0}
+        self._tasks[platform] = asyncio.create_task(
+            self._run_refresh(plat), name=f"refresh-{platform}"
+        )
+
+    async def _run_refresh(self, plat) -> None:
+        platform = plat.id
+        stop = self._stops[platform]
+        counters = self._counters[platform]
+
+        def progress(msg: str) -> None:
+            self._progress[platform] = f"[补全] {msg}"
+            logger.info("%s", self._progress[platform])
+
+        status, message = "done", ""
+        dp = None
+        try:
+            jobs = await asyncio.to_thread(_db_load_missing_active, platform)
+            if not jobs:
+                message = "没有需要补全的岗位(活跃字段均已存在)"
+                progress(message)
+                return
+            progress(f"待补全 {len(jobs)} 条")
+            await browser_manager.ensure()
+            page = await browser_manager.get_or_open_page(
+                plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
+            )
+
+            # 旧数据可能缺防重定向参数(Boss securityId/lid):裸直链通常仍能按
+            # jobId 正常落地;若被平台重定向到其它岗位,_parse_detail 的
+            # "落地 jobId 必须匹配"校验会将其标记 offline,不会写错数据。
+            todo = list(jobs)
+            dp = await browser_manager.primary_context().new_page()
+            ok = 0
+            bad = 0
+            for i, j in enumerate(todo, start=1):
+                if stop.is_set():
+                    status, message = "stopped", "用户手动停止"
+                    break
+                progress(f"{i}/{len(todo)}:「{j['title'][:14]}」")
+                draft = JobDraft(
+                    platform_job_id=j["platform_job_id"],
+                    title=j["title"],
+                    url=j["url"],
+                    open_params=dict(j["extra"]),
+                    raw={
+                        "securityId": j["extra"].get("securityId", ""),
+                        "lid": j["extra"].get("lid", ""),
+                    },
+                )
+                try:
+                    await plat._parse_detail(dp, draft)
+                except AntiBot as exc:
+                    status, message = "error", f"触发风控: {exc}"
+                    break
+                except LoginRequired as exc:
+                    status, message = "error", str(exc)
+                    break
+                if draft.raw.get("offline"):
+                    await asyncio.to_thread(
+                        _db_add_events, platform, [f"补全:岗位已下线,跳过: {j['title']}"]
+                    )
+                    bad += 1
+                elif draft.raw.get("blanked"):
+                    await asyncio.to_thread(
+                        _db_add_events, platform, [f"补全:详情页被反自动化拦截,跳过: {j['title']}"]
+                    )
+                    bad += 1
+                else:
+                    changed = await asyncio.to_thread(_db_refresh_job_active, j["id"], draft)
+                    if changed:
+                        ok += 1
+                    else:
+                        bad += 1  # 平台未提供活跃信息,无字段变化
+                counters.update(found=ok, skipped=bad)
+            if status == "done":
+                message = f"补全完成:更新 {ok},未获取 {bad},共 {len(todo)} 条"
+        except LoginRequired as exc:
+            status, message = "error", str(exc)
+        except AntiBot as exc:
+            status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("补全任务异常")
+            status, message = "error", f"{type(exc).__name__}: {exc}"
+        finally:
+            if dp is not None:
+                # 停在安全验证页时保留标签(验证页只替换内容不改URL,须检测页面文本),
+                # 供人工完成滑块后平台自动回跳
+                keep = False
+                try:
+                    txt = await dp.evaluate(
+                        "() => (document.title||'') + ((document.body?.innerText||'').slice(0, 2000))"
+                    )
+                    keep = any(k in (txt or "") for k in ("安全验证", "安全挑战", "拖动滑块", "验证码"))
+                except Exception:  # noqa: BLE001
+                    keep = False
+                if not keep:
+                    try:
+                        await dp.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+            self._progress[platform] = f"[补全] {message or status}"
+            self._tasks.pop(platform, None)
+            self._stops.pop(platform, None)
+            logger.info("补全任务结束: %s - %s", status, message)
 
     # ---------- 任务体 ----------
     async def _run(self, plat, task_id: int, snap: dict) -> None:

@@ -61,6 +61,19 @@ def stop_task(platform: str):
     return {"ok": False, "msg": "该平台当前没有运行中的任务"}
 
 
+@router.post("/tasks/refresh_active")
+async def refresh_active(body: dict):
+    """旧数据修复:对活跃字段为空的岗位重新解析详情页并回写(与抓取共用平台互斥)。"""
+    platform = body.get("platform")
+    if platform not in PLATFORMS:
+        raise HTTPException(400, f"platform 必须是 {PLATFORMS}")
+    try:
+        await scheduler.start_refresh(platform)
+    except AlreadyRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"ok": True, "msg": "补全任务已启动,进度见左栏状态区"}
+
+
 @router.get("/tasks/status")
 def task_status():
     """各平台实时运行状态(内存进度)。"""

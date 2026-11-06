@@ -15,6 +15,10 @@ from .models import init_db
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(config.DATA_DIR / "app.log", encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger("job_finder")
 

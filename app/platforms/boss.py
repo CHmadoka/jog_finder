@@ -248,9 +248,16 @@ class BossPlatform(BasePlatform):
     # ---------- 风控 ----------
     async def _is_verify_page(self, page: Page) -> bool:
         try:
+            u = page.url or ""
+            if "_security_check" in u or "security-check" in u or "/verify" in u:
+                return True
             title = await page.title()
             text = (await page.evaluate("() => (document.body?.innerText||'').slice(0,3000)")) or ""
-            return bool(_VERIFY_TEXT_RE.search(title + text))
+            if _VERIFY_TEXT_RE.search(title or ""):
+                return True
+            # 正文误报防线:正常岗位详情可能含"验证码"等词(如 AI 类岗位描述),
+            # 而真验证页正文极少(仅标题+滑块)。要求内容足够短才凭文本判定。
+            return bool(_VERIFY_TEXT_RE.search(text)) and len(text) < 800
         except Exception:
             return "verify" in page.url
 
@@ -421,6 +428,37 @@ class BossPlatform(BasePlatform):
                 except Exception:
                     pass
 
+    async def rebuild_open_params(self, page: Page, jid2kw: dict[str, str], progress=None) -> dict[str, dict]:
+        """翻列表接口,为旧岗位重建 securityId/lid(防详情直链被重定向)。
+
+        按旧数据的抓取关键词逐词翻页(最多5页/词),命中即收集。
+        """
+        ok_onsite, page = await self._ensure_on_domain(page)
+        if not ok_onsite:
+            raise AntiBot("Boss 页面未能加载,无法重建岗位参数,请在浏览器中手动打开 zhipin.com 后重试")
+        out: dict[str, dict] = {}
+        kws = sorted({(k or "").strip() for k in jid2kw.values() if (k or "").strip()})
+        for kw in kws:
+            for page_num in range(1, 6):
+                if all(jid in out for jid in jid2kw):
+                    return out
+                if progress:
+                    progress(f"重建岗位参数: 「{kw}」第 {page_num} 页")
+                res = await self._fetch_joblist(page, kw, "", page_num)
+                if not res or res.get("code") != 0:
+                    break
+                for x in res.get("list") or []:
+                    jid = str(x.get("id") or "")
+                    if jid in jid2kw and jid not in out:
+                        out[jid] = {
+                            "securityId": str(x.get("securityId") or ""),
+                            "lid": str(x.get("lid") or ""),
+                        }
+                if not res.get("hasMore", True):
+                    break
+                await human_delay()
+        return out
+
     # ---------- 主流程 ----------
     async def iter_jobs(
         self,
@@ -503,14 +541,16 @@ class BossPlatform(BasePlatform):
                     break
         finally:
             if own_detail and dp is not None:
-                # 停在安全验证页时保留标签:用户完成滑块后平台会自动跳回岗位页,
-                # 无需用户再手动开页面
+                # 停在安全验证页时保留标签:验证页只替换内容不改URL,须检测页面文本;
+                # 用户完成滑块后平台会自动跳回岗位页,无需再手动开页面
                 keep_verify = False
                 try:
-                    u = dp.url or ""
-                    keep_verify = "_security_check" in u or "security-check" in u
+                    txt = await dp.evaluate(
+                        "() => (document.title||'') + ((document.body?.innerText||'').slice(0, 2000))"
+                    )
+                    keep_verify = any(k in (txt or "") for k in ("安全验证", "安全挑战", "拖动滑块", "验证码"))
                 except Exception:  # noqa: BLE001
-                    pass
+                    keep_verify = False
                 if not keep_verify:
                     try:
                         await dp.close()

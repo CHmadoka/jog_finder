@@ -89,3 +89,12 @@ class BasePlatform(ABC):
 
     def describe(self) -> dict:
         return {"id": self.id, "name": self.name, "home_url": self.home_url}
+
+    async def rebuild_open_params(self, page: Page, jid2kw: dict[str, str], progress=None) -> dict[str, dict]:
+        """旧数据修复:为岗位重建"打开详情所需的参数"(Boss securityId/lid 等)。
+
+        jid2kw: {platform_job_id: 当初抓取的关键词}。返回 {platform_job_id: params}。
+        默认实现:详情直链无需额外参数(如 job51/liepin),视为全部可定位。
+        拿不到的岗位不出现在返回中(调用方视为已下线/不可定位)。
+        """
+        return {jid: {} for jid in jid2kw}

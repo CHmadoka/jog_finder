@@ -154,7 +154,11 @@ class BrowserManager:
         ]
         if config.BROWSER_NO_PROXY:
             args.append("--no-proxy-server")
-        args.append(start_url)
+        # 首屏固定 about:blank:先注入反调试免疫补丁,再用 CDP 原生导航到目标页。
+        # 若直接以平台页为首屏,页面文档瞬间创建,注入只能覆盖"未来文档",
+        # 首屏必然经历一段无补丁裸奔窗口——反调试脚本一旦命中便 window.close()
+        # 偷关标签(命令行打开的窗口可被脚本关闭),唯一标签关闭即整个浏览器退出。
+        args.append("about:blank")
         logger.info("拉起浏览器: %s (profile=%s, 首屏=%s)", exe, profile, start_url[:60])
         # DETACHED_PROCESS:与父进程(console/stdio/生命周期)完全解耦,
         # 避免服务环境导致浏览器启动失败或随父进程连带退出
@@ -173,10 +177,10 @@ class BrowserManager:
             if await is_cdp_alive(config.CDP_PORT):
                 break
             await asyncio.sleep(probe_gap)
-        # 趁首屏还在 about:blank/加载初期,用原生 CDP 抢先注入反调试免疫
-        # (不经 Playwright,避免其 Runtime.enable 引发平台检测)。
-        # 若未赶上(文档已创建),由 _connect 里的 reload 兜底。
+        # 对 about:blank 首屏注册免疫补丁(覆盖其后所有文档),再原生导航到目标页
         await self._inject_antidebug_native()
+        if start_url != "about:blank":
+            await self._native_navigate(start_url)
         if fast:
             # 打开页面不需要 Playwright 级别的 target 稳定,见到域名即可
             await wait_page_target(config.CDP_PORT, frag, 8)
@@ -212,6 +216,32 @@ class BrowserManager:
                     logger.debug("原生免疫注入失败: %s", ws_url[:50], exc_info=True)
         except Exception:  # noqa: BLE001
             logger.debug("原生免疫注入枚举失败", exc_info=True)
+
+    @staticmethod
+    async def _native_navigate(url: str) -> None:
+        """通过原生 CDP 把当前活动标签导航到目标页(不经 Playwright,无检测风险)。"""
+        base = f"http://127.0.0.1:{config.CDP_PORT}"
+        try:
+            async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+                lst = (await client.get(f"{base}/json/list")).json()
+            t = next((x for x in lst if x.get("type") == "page"), None)
+            if not t:
+                return
+            ws_url = (t.get("webSocketDebuggerUrl") or "").replace("localhost", "127.0.0.1")
+            async with websockets.connect(ws_url, open_timeout=10, max_size=8 * 1024 * 1024) as ws:
+                await ws.send(json.dumps({"id": 1, "method": "Page.enable"}))
+                await ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": url}}))
+                try:
+                    while True:
+                        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+                        if msg.get("id") == 2:
+                            if "error" in msg:
+                                logger.warning("首屏原生导航失败: %s", msg["error"].get("message", ""))
+                            break
+                except asyncio.TimeoutError:
+                    logger.debug("首屏原生导航响应超时(继续等待 target 轮询)")
+        except Exception:  # noqa: BLE001
+            logger.debug("首屏原生导航异常: %s", url[:60], exc_info=True)
 
     async def _connect(self) -> None:
         self._playwright = await async_playwright().start()
@@ -266,10 +296,57 @@ class BrowserManager:
         except Exception:  # noqa: BLE001
             logger.debug("add_init_script 失败", exc_info=True)
         for pg in list(ctx.pages):
+            pg.on("close", BrowserManager._make_reopen_handler(pg))
             try:
                 await pg.reload(wait_until="domcontentloaded", timeout=15000)
             except Exception:  # noqa: BLE001
                 logger.debug("免疫 reload 失败: %s", pg.url[:60], exc_info=True)
+        # 未来新增的页面(如详情标签)同样挂看门狗
+        ctx.on("page", BrowserManager._on_new_page_watch)
+
+    @staticmethod
+    def _on_new_page_watch(page: Page) -> None:
+        page.on("close", BrowserManager._make_reopen_handler(page))
+
+    _reopen_at: dict[str, float] = {}
+
+    @staticmethod
+    def _make_reopen_handler(page: Page):
+        url = page.url
+
+        def _on_close() -> None:
+            # 看门狗:平台域名页面被关闭(反调试 window.close 偷关/误关)时,
+            # 自动重开,保证浏览器始终至少有一个平台标签,避免整个浏览器退出。
+            if not url or url.startswith(("about:", "chrome:", "devtools:")):
+                return
+            import time as _time
+
+            now = _time.time()
+            last = BrowserManager._reopen_at.get(url, 0)
+            if now - last < 5:
+                return
+            BrowserManager._reopen_at[url] = now
+            logger.warning("页面被关闭,自动重开载体页: %s", url[:80])
+            BrowserManager._schedule_reopen(url)
+
+        return _on_close
+
+    @staticmethod
+    def _schedule_reopen(url: str) -> None:
+        async def _do() -> None:
+            try:
+                ctx = browser_manager.primary_context()
+                pg = await ctx.new_page()
+                await pg.goto(url, wait_until="domcontentloaded", timeout=20000)
+                logger.info("载体页已重开: %s", url[:80])
+            except Exception:  # noqa: BLE001
+                logger.debug("重开载体页失败", exc_info=True)
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_do())
+        except RuntimeError:
+            pass
 
     def primary_context(self) -> BrowserContext:
         if not self._browser or not self._browser.contexts:

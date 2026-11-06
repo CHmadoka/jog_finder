@@ -378,7 +378,15 @@ const app = createApp({
       if (cmd === "gears") openGearDialog();
       else if (cmd === "filters") openFilterDialog();
       else if (cmd === "export") exportJobs();
+      else if (cmd === "refresh_active") refreshActive();
       else if (cmd === "clear") clearAll();
+    }
+    async function refreshActive() {
+      try {
+        await api("/tasks/refresh_active", { method: "POST", body: { platform: grab.platform } });
+        ElMessage.success("补全任务已启动,进度见左栏状态区");
+        loadTasks();
+      } catch (e) {}
     }
 
     // 搜索防抖:输入即搜
