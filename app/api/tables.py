@@ -106,15 +106,13 @@ def clear_table(table_id: int, db: Session = Depends(get_session)):
 
 @router.delete("/{table_id}")
 def delete_table(table_id: int, db: Session = Depends(get_session)):
-    """删除数据表;其下岗位自动归入默认表。默认表不可删除。"""
+    """删除数据表:连同该表内全部岗位数据一并删除。默认表不可删除。"""
     if table_id == DEFAULT_TABLE[0]:
         raise HTTPException(403, "默认表不可删除")
     row = db.get(JobTable, table_id)
     if not row:
         raise HTTPException(404, "数据表不存在")
-    db.query(Job).filter(Job.table_id == table_id).update(
-        {Job.table_id: DEFAULT_TABLE[0]}, synchronize_session=False
-    )
+    db.query(Job).filter(Job.table_id == table_id).delete(synchronize_session=False)
     db.delete(row)
     db.commit()
     return {"ok": True}

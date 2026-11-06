@@ -476,12 +476,16 @@ const app = createApp({
     }
     async function delTable(row) {
       await ElMessageBox.confirm(
-        `删除数据表「${row.name}」?表内 ${row.job_count || 0} 条岗位将自动归入默认表。`,
-        "删除数据表", { type: "warning" }
+        `是否要删除表「${row.name}」并清除所有表数据?表内 ${row.job_count || 0} 条岗位将一并删除,且不可恢复。`,
+        "删除数据表", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
       );
       await api(`/tables/${row.id}`, { method: "DELETE" });
       ElMessage.success("已删除");
-      if ((query.table_id || 1) === row.id) query.table_id = 1;
+      // 删除的是当前选中的表:自动切回默认表并刷新列表
+      if ((query.table_id || 1) === row.id) {
+        query.table_id = 1;
+        reloadJobs();
+      }
       resetTableForm();
       loadTables();
     }

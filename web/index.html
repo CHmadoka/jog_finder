@@ -156,24 +156,40 @@
     .dlg-formline { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
     .dlg-formline .el-select { flex: 1; min-width: 0; }
 
-    /* 列表容器:清晰边界 */
+    /* 列表容器:清晰边界;行式布局(无表头) */
     .dlg-list {
       border: 1px solid var(--border); border-radius: 10px;
-      background: #fff; padding: 2px 12px 6px;
+      background: #fff; padding: 4px 12px;
     }
+    .dlg-row {
+      display: flex; align-items: center; gap: 10px;
+      margin: 0 -8px; padding: 9px 8px;
+      border-bottom: 1px solid #f3f4f8; border-radius: 8px;
+      transition: background .12s;
+    }
+    .dlg-row:hover { background: #f7f8fc; }
+    .dlg-row:last-child { border-bottom: none; }
+    .dlg-name { font-weight: 500; color: var(--text); }
+    .dlg-sub { font-size: 12px; color: var(--text3); word-break: break-all; }
+    .dlg-empty { padding: 18px 0; text-align: center; font-size: 12px; color: var(--text3); }
 
-    /* 胶囊操作按钮 */
-    .mini-btn {
-      border: none; background: transparent; color: var(--el-color-primary);
-      padding: 4px 10px; border-radius: 999px; font-size: 12px;
-      cursor: pointer; transition: all .15s; line-height: 1.4;
+    /* 幽灵图标按钮(操作列) */
+    .act-btn {
+      display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+      border: none; background: transparent; color: var(--text2);
+      font-size: 12px; padding: 4px 9px; border-radius: 7px;
+      cursor: pointer; transition: all .13s; line-height: 1.4;
     }
-    .mini-btn:hover { background: var(--el-color-primary-light-9); }
-    .mini-btn.warn { color: #e6a23c; }
-    .mini-btn.warn:hover { background: #fdf6ec; }
-    .mini-btn.danger { color: #dc2626; }
-    .mini-btn.danger:hover { background: #fef2f2; }
-    .mini-btn:disabled { color: #c0c4cc; cursor: not-allowed; background: transparent; }
+    .act-btn .el-icon { font-size: 13px; }
+    .act-btn:hover { background: #eef0f6; color: var(--text); }
+    .act-btn.primary { color: var(--el-color-primary); }
+    .act-btn.primary:hover { background: var(--el-color-primary-light-9); }
+    .act-btn.warn { color: #d97706; }
+    .act-btn.warn:hover { background: #fdf3e3; }
+    .act-btn.danger { color: #dc2626; }
+    .act-btn.danger:hover { background: #fdecec; }
+    .act-btn:disabled { color: #c6cbd4; cursor: not-allowed; }
+    .act-btn:disabled:hover { background: transparent; }
 
     .k-unit { color: #f59e0b; font-weight: 700; font-size: 13px; }
 
@@ -645,30 +661,40 @@
   </el-dialog>
 
   <!-- ===================== 岗位设置管理 ===================== -->
-  <el-dialog v-model="gearVisible" title="岗位设置管理" width="680px">
+  <el-dialog v-model="gearVisible" title="岗位设置管理" width="660px">
     <div class="dlg-formline">
       <el-input v-model="gearForm.name" placeholder="设置名,如: Java后端" style="width:170px; flex-shrink:0"
                 @keyup.enter="saveGear" />
       <el-select v-model="gearForm.keywords" multiple filterable allow-create default-first-option
-                 :placeholder="gearForm.id ? '编辑词条(回车添加)' : '岗位词条,输入后回车,如: Java / 服务端'" />
-      <el-button type="primary" style="flex-shrink:0" @click="saveGear">{{ gearForm.id ? '更新' : '添加' }}</el-button>
-      <el-button v-if="gearForm.id" style="flex-shrink:0" @click="resetGearForm">取消</el-button>
+                 placeholder="岗位词条,输入后回车,如: Java / 服务端" />
+      <el-button type="primary" style="flex-shrink:0" :disabled="!!gearForm.id" @click="saveGear">
+        <el-icon><Plus /></el-icon>添加
+      </el-button>
     </div>
     <div class="dlg-list">
-      <el-table :data="gears" size="small" class="dlg-table">
-        <el-table-column prop="name" label="名称" width="140" />
-        <el-table-column label="词条">
-          <template #default="{ row }">
-            <el-tag v-for="k in row.keywords" :key="k" size="small" effect="plain" style="margin:2px">{{ k }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" align="right">
-          <template #default="{ row }">
-            <button class="mini-btn" @click="editGear(row)">编辑</button>
-            <button class="mini-btn danger" @click="delGear(row.id)">删除</button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="dlg-row" v-for="g in gears" :key="g.id">
+        <template v-if="gearForm.id === g.id">
+          <el-input v-model="gearForm.name" size="small" style="width:160px; flex-shrink:0"
+                    @keyup.enter="saveGear" />
+          <el-select v-model="gearForm.keywords" size="small" multiple filterable allow-create
+                     default-first-option placeholder="词条,回车添加" style="flex:1; min-width:0" />
+          <button class="act-btn primary" style="flex-shrink:0" @click="saveGear">
+            <el-icon><Check /></el-icon>保存
+          </button>
+          <button class="act-btn" style="flex-shrink:0" @click="resetGearForm">
+            <el-icon><Close /></el-icon>取消
+          </button>
+        </template>
+        <template v-else>
+          <div style="flex:1; min-width:0">
+            <div class="dlg-name">{{ g.name }}</div>
+            <div class="dlg-sub">{{ (g.keywords || []).join(' / ') || '无词条' }}</div>
+          </div>
+          <button class="act-btn" @click="editGear(g)"><el-icon><EditPen /></el-icon>编辑</button>
+          <button class="act-btn danger" @click="delGear(g.id)"><el-icon><Delete /></el-icon>删除</button>
+        </template>
+      </div>
+      <div class="dlg-empty" v-if="!gears.length">暂无岗位设置</div>
     </div>
   </el-dialog>
 
@@ -700,10 +726,10 @@
             <el-tag v-for="k in (row.extras.industries_prefer || [])" :key="k" size="small" type="success" effect="plain" style="margin:2px">{{ k }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" align="right" fixed="right">
+        <el-table-column label="操作" width="104" align="right" fixed="right">
           <template #default="{ row }">
-            <button class="mini-btn" @click="editFilter(row)">编辑</button>
-            <button class="mini-btn danger" @click="delFilter(row.id)">删除</button>
+            <button class="act-btn" @click="editFilter(row)"><el-icon><EditPen /></el-icon>编辑</button>
+            <button class="act-btn danger" @click="delFilter(row.id)"><el-icon><Delete /></el-icon>删除</button>
           </template>
         </el-table-column>
       </el-table>
@@ -752,39 +778,37 @@
   </el-dialog>
 
   <!-- ===================== 数据表管理 ===================== -->
-  <el-dialog v-model="tableVisible" title="数据表管理" width="620px">
-    <div class="dlg-formline" v-if="tableForm.id">
-      <span class="muted" style="flex-shrink:0">重命名 #{{ tableForm.id }}</span>
-      <el-input v-model="tableForm.name" placeholder="新表名" style="width:180px; flex-shrink:0"
-                @keyup.enter="saveTable" />
-      <el-input v-model="tableForm.slug" placeholder="标识符(数据表_id)" style="width:170px; flex-shrink:0" />
-      <el-button type="primary" style="flex-shrink:0" @click="saveTable">保存</el-button>
-      <el-button style="flex-shrink:0" @click="resetTableForm">取消</el-button>
-    </div>
-    <div class="dlg-formline" v-else>
-      <el-button type="primary" @click="createTable">新建数据表</el-button>
-      <span class="muted">自动命名「新数据表_n」,标识符自动取「数据表_id」</span>
+  <el-dialog v-model="tableVisible" title="数据表管理" width="600px">
+    <div class="dlg-formline">
+      <el-button type="primary" @click="createTable"><el-icon><Plus /></el-icon>新建数据表</el-button>
+      <span class="muted">自动命名「新数据表_n」,标识符「数据表_id」</span>
     </div>
     <div class="dlg-list">
-      <el-table :data="tables" size="small" class="dlg-table">
-        <el-table-column prop="id" label="ID" width="52" align="center" />
-        <el-table-column label="表名" min-width="130">
-          <template #default="{ row }">
-            {{ row.name }}
-            <el-tag v-if="row.id === 1" size="small" type="info" effect="plain" style="margin-left:6px">默认</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="slug" label="标识符" min-width="100" />
-        <el-table-column prop="job_count" label="岗位数" width="70" align="center" />
-        <el-table-column label="操作" width="150" align="right">
-          <template #default="{ row }">
-            <button class="mini-btn" @click="editTable(row)">编辑</button>
-            <button class="mini-btn warn" :disabled="!row.job_count" @click="clearTable(row)">清空</button>
-            <button class="mini-btn danger" :disabled="row.id === 1"
-                    :title="row.id === 1 ? '默认表不可删除' : ''" @click="delTable(row)">删除</button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="dlg-row" v-for="t in tables" :key="t.id">
+        <template v-if="tableForm.id === t.id">
+          <el-input v-model="tableForm.name" size="small" placeholder="新表名" style="width:190px"
+                    @keyup.enter="saveTable" />
+          <span class="dlg-sub">{{ t.slug }}</span>
+          <span style="flex:1"></span>
+          <button class="act-btn primary" @click="saveTable"><el-icon><Check /></el-icon>保存</button>
+          <button class="act-btn" @click="resetTableForm"><el-icon><Close /></el-icon>取消</button>
+        </template>
+        <template v-else>
+          <span class="dlg-name">
+            {{ t.name }}
+            <el-tag v-if="t.id === 1" size="small" type="info" effect="plain" style="margin-left:6px">默认</el-tag>
+          </span>
+          <span class="dlg-sub">{{ t.job_count }} 条</span>
+          <span style="flex:1"></span>
+          <button class="act-btn" @click="editTable(t)"><el-icon><EditPen /></el-icon>编辑</button>
+          <button class="act-btn warn" :disabled="!t.job_count" @click="clearTable(t)">
+            <el-icon><Brush /></el-icon>清空
+          </button>
+          <button class="act-btn danger" :disabled="t.id === 1" :title="t.id === 1 ? '默认表不可删除' : ''"
+                  @click="delTable(t)"><el-icon><Delete /></el-icon>删除</button>
+        </template>
+      </div>
+      <div class="dlg-empty" v-if="!tables.length">暂无数据表</div>
     </div>
   </el-dialog>
 </div>
