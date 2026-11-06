@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>job_finder - 岗位自动抓取</title>
+  <link rel="stylesheet" href="https://registry.npmmirror.com/element-plus/2.7.3/files/dist/index.css" />
+  <script src="https://registry.npmmirror.com/vue/3.4.27/files/dist/vue.global.prod.js"></script>
+  <script src="https://registry.npmmirror.com/element-plus/2.7.3/files/dist/index.full.min.js"></script>
+  <script src="https://registry.npmmirror.com/element-plus/2.7.3/files/dist/locale/zh-cn.min.js"></script>
+  <script src="https://registry.npmmirror.com/@element-plus/icons-vue/2.3.1/files/dist/index.iife.min.js"></script>
+  <style>
+    :root {
+      --el-color-primary: #4c6ef5;
+      --el-color-primary-light-3: #7a90f8;
+      --el-color-primary-light-5: #a3b2fa;
+      --el-color-primary-light-7: #ccd4fc;
+      --el-color-primary-light-8: #dde2fd;
+      --el-color-primary-light-9: #eef1fe;
+      --el-color-primary-dark-2: #3d58c4;
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --border: #e8eaf2;
+      --text: #1f2329;
+      --text2: #646a73;
+      --text3: #9aa0aa;
+      --radius: 12px;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 2px 6px rgba(16, 24, 40, .05);
+    }
+    * { box-sizing: border-box; }
+    html, body, #app { height: 100%; margin: 0; }
+    body {
+      font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--text); font-size: 14px;
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #d3d7e0; border-radius: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* ---------- 顶栏 ---------- */
+    .topbar {
+      height: 56px; background: var(--card); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 20px; gap: 14px;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; }
+    .brand .logo {
+      width: 30px; height: 30px; border-radius: 8px; color: #fff; font-size: 16px;
+      background: linear-gradient(135deg, #4c6ef5, #7c5cf5);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .brand .sub { font-size: 12px; font-weight: 400; color: var(--text3); }
+    .topbar .spacer { flex: 1; }
+
+    /* ---------- 布局 ---------- */
+    .layout { display: flex; height: calc(100vh - 56px); }
+    .side {
+      width: 396px; flex-shrink: 0; padding: 14px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .main { flex: 1; min-width: 0; padding: 14px 14px 14px 0; display: flex; flex-direction: column; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px;
+    }
+    .card-title {
+      font-size: 14px; font-weight: 600; display: flex; align-items: center;
+      justify-content: space-between; margin-bottom: 12px;
+    }
+    .card-title .aux { font-size: 12px; font-weight: 400; }
+
+    /* ---------- 平台选择 ---------- */
+    .platform-switch { display: flex; gap: 8px; }
+    .psw-item {
+      flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px;
+      text-align: center; cursor: pointer; font-size: 13px; color: var(--text2);
+      transition: all .15s; position: relative; user-select: none;
+    }
+    .psw-item:hover { border-color: var(--el-color-primary-light-5); color: var(--text); }
+    .psw-item.active {
+      border-color: var(--el-color-primary); color: var(--el-color-primary);
+      background: var(--el-color-primary-light-9); font-weight: 600;
+    }
+    .psw-item .badge {
+      position: absolute; top: -5px; right: -5px; width: 9px; height: 9px; border-radius: 50%;
+      border: 2px solid #fff;
+    }
+    .badge.on { background: #22c55e; }
+    .badge.off { background: #cbd2dc; }
+
+    /* ---------- 模式切换 ---------- */
+    .seg { display: flex; background: #eef0f6; border-radius: 8px; padding: 3px; gap: 3px; }
+    .seg-item {
+      flex: 1; text-align: center; font-size: 13px; padding: 6px 0; border-radius: 6px;
+      cursor: pointer; color: var(--text2); transition: all .15s; user-select: none;
+    }
+    .seg-item.active { background: #fff; color: var(--el-color-primary); font-weight: 600; box-shadow: 0 1px 3px rgba(16,24,40,.08); }
+
+    .field-label { font-size: 12px; color: var(--text3); margin: 10px 0 4px; }
+    .field-label .link { float: right; }
+    .link { color: var(--el-color-primary); cursor: pointer; font-size: 12px; }
+    .link:hover { text-decoration: underline; }
+
+    /* ---------- 已存条件摘要 ---------- */
+    .cond-summary {
+      background: #f7f8fc; border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--text2); line-height: 1.9;
+    }
+    .cond-summary .cs-k { color: var(--text3); display: inline-block; width: 44px; }
+    .cond-summary .el-tag { margin-right: 4px; }
+
+    .start-hint { font-size: 12px; color: #e6a23c; margin-top: 8px; text-align: center; }
+
+    /* ---------- 运行状态 ---------- */
+    .run-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.on { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); animation: blink 1.2s infinite; }
+    .dot.off { background: #cbd2dc; }
+    @keyframes blink { 50% { opacity: .4; } }
+    .progress-text { font-size: 12px; color: var(--text2); line-height: 1.7; word-break: break-all; margin-top: 8px; }
+    .counters { display: flex; gap: 8px; margin-top: 10px; }
+    .counter {
+      flex: 1; background: #f7f8fc; border-radius: 8px; text-align: center; padding: 8px 0;
+    }
+    .counter .num { font-size: 18px; font-weight: 700; color: var(--text); }
+    .counter .lbl { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+    /* ---------- 任务历史 ---------- */
+    .task-row {
+      display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px;
+      border-bottom: 1px dashed #eef0f6;
+    }
+    .task-row:last-child { border-bottom: none; }
+    .task-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+    .task-time { color: var(--text3); flex-shrink: 0; }
+    .empty-tip { font-size: 12px; color: var(--text3); text-align: center; padding: 12px 0; }
+
+    /* ---------- 右侧数据区 ---------- */
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .stat-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+    .stat-chip {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 8px 16px; cursor: pointer; transition: all .15s; user-select: none;
+    }
+    .stat-chip:hover { border-color: var(--el-color-primary-light-5); }
+    .stat-chip.active { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+    .stat-chip .num { font-size: 17px; font-weight: 700; }
+    .stat-chip .lbl { font-size: 12px; color: var(--text3); margin-left: 6px; }
+    .table-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 8px 12px 12px; flex: 1; min-height: 0;
+      display: flex; flex-direction: column;
+    }
+    .table-card .el-table { flex: 1; }
+    .pager { display: flex; justify-content: flex-end; margin-top: 10px; }
+
+    .remark-cell { font-size: 12px; color: #b45309; }
+    .job-title { font-weight: 600; cursor: pointer; }
+    .job-title:hover { color: var(--el-color-primary); }
+    .muted { color: var(--text3); font-size: 12px; }
+
+    .drawer-desc {
+      white-space: pre-wrap; line-height: 1.9; font-size: 13px;
+      background: #f7f8fc; border-radius: 8px; padding: 12px 14px;
+    }
+    .block-title { font-size: 13px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; }
+    .mb8 { margin-bottom: 8px; }
+    .el-table .el-table__row { cursor: pointer; }
+
+    /* ---------- 操作按钮 ---------- */
+    .op-btn { padding: 5px; }
+    .op-btn + .op-btn { margin-left: 6px; }
+    .op-btn.op-danger { color: #dc2626; border-color: #f3c1c1; }
+    .op-btn.op-danger:hover { background: #fef2f2; border-color: #dc2626; }
+
+    /* ---------- 左下角异常面板 ---------- */
+    .event-fab {
+      position: fixed; left: 16px; bottom: 16px; z-index: 60;
+      background: #fff; border: 1px solid #f3c1c1; color: #dc2626;
+      border-radius: 20px; padding: 8px 14px; font-size: 12px; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(220, 38, 38, .12);
+      display: flex; align-items: center; gap: 6px; font-weight: 600;
+      transition: all .15s;
+    }
+    .event-fab:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(220, 38, 38, .2); }
+    .event-fab .cnt {
+      background: #dc2626; color: #fff; border-radius: 10px;
+      padding: 1px 8px; font-weight: 700; font-size: 11px;
+    }
+    .event-panel {
+      position: fixed; left: 16px; bottom: 58px; z-index: 60; width: 560px; max-height: 46vh;
+      background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: 0 10px 36px rgba(16, 24, 40, .16);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .ep-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      font-weight: 600; font-size: 13px; flex-shrink: 0;
+    }
+    .ep-body { overflow-y: auto; padding: 2px 14px; }
+    .ep-row {
+      display: flex; gap: 10px; padding: 8px 0; font-size: 12px;
+      border-bottom: 1px dashed #f0f1f6; line-height: 1.55; align-items: baseline;
+    }
+    .ep-time { color: var(--text3); flex-shrink: 0; font-family: Consolas, monospace; }
+    .ep-plat { color: var(--el-color-primary); flex-shrink: 0; }
+    .ep-msg { color: #b45309; word-break: break-all; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- ===================== 顶栏 ===================== -->
+  <div class="topbar">
+    <div class="brand">
+      <span class="logo">J</span>
+      <span>JobFinder</span>
+      <span class="sub">已登录浏览器自动抓取岗位 · {{ healthText }}</span>
+    </div>
+    <div class="spacer"></div>
+    <el-dropdown @command="onMenu">
+      <el-button>
+        管理与工具 <el-icon style="margin-left:4px"><arrow-down /></el-icon>
+      </el-button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item command="gears">岗位档位管理</el-dropdown-item>
+          <el-dropdown-item command="filters">筛选条件管理</el-dropdown-item>
+          <el-dropdown-item command="export" divided>导出 Excel（当前筛选平台）</el-dropdown-item>
+          <el-dropdown-item command="clear">清空岗位库…</el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+  </div>
+
+  <div class="layout">
+    <!-- ===================== 左栏:发起抓取 ===================== -->
+    <aside class="side">
+      <!-- 发起抓取 -->
+      <div class="card">
+        <div class="card-title">发起抓取</div>
+
+        <div class="platform-switch">
+          <div v-for="p in platforms" :key="p.id" class="psw-item"
+               :class="{ active: grab.platform === p.id }" @click="switchPlatform(p.id)">
+            <span class="badge" :class="isRunning(p.id) ? 'on' : 'off'"></span>
+            {{ p.name }}
+          </div>
+        </div>
+
+        <div class="seg" style="margin-top:12px;">
+          <div class="seg-item" :class="{ active: grab.mode === 'quick' }" @click="grab.mode = 'quick'">快速抓取</div>
+          <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
+        </div>
+
+        <!-- 快速抓取 -->
+        <template v-if="grab.mode === 'quick'">
+          <div class="field-label">
+            岗位档位
+            <span class="link" @click="openGearDialog">管理档位</span>
+          </div>
+          <el-select v-model="grab.gear_id" placeholder="选择档位(一次跑其全部词条)" filterable style="width:100%">
+            <el-option v-for="g in gears" :key="g.id" :value="g.id"
+                       :label="g.name + ' · ' + (g.keywords || []).length + ' 个词条'">
+              <span>{{ g.name }}</span>
+              <span style="float:right; color:#9aa0aa; font-size:12px">{{ (g.keywords || []).join(' / ') }}</span>
+            </el-option>
+          </el-select>
+
+          <div class="field-label">城市</div>
+          <el-input v-model="grab.city" placeholder="如:武汉(留空 = 全国)" clearable />
+
+          <div class="field-label">
+            限定词条(可选)
+            <span class="link" @click="grab.keyword = ''" v-if="grab.keyword">清除</span>
+          </div>
+          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词,留空跑档位全部词条" clearable />
+
+          <div class="field-label">每词条最多翻页数</div>
+          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" />
+        </template>
+
+        <!-- 已存条件 -->
+        <template v-else>
+          <div class="field-label">
+            选择条件
+            <span class="link" @click="openFilterDialog">管理条件</span>
+          </div>
+          <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="width:100%">
+            <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name" />
+          </el-select>
+          <div class="empty-tip" v-if="!filters.length">
+            当前平台暂无已存条件，点击右上角「管理条件」创建
+          </div>
+          <div class="cond-summary" v-if="selectedFilter">
+            <div><span class="cs-k">城市</span>{{ selectedFilter.city || '全国' }}</div>
+            <div><span class="cs-k">档位</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联档位' }}</div>
+            <div><span class="cs-k">词条</span>{{ selectedFilter.keyword || '(按档位全部词条抓取)' }}</div>
+            <div v-if="(selectedFilter.extras.industries_avoid || []).length">
+              <span class="cs-k">避开</span>
+              <el-tag v-for="k in selectedFilter.extras.industries_avoid" :key="k" size="small" type="danger" effect="plain">{{ k }}</el-tag>
+            </div>
+            <div v-if="(selectedFilter.extras.industries_prefer || []).length">
+              <span class="cs-k">优先</span>
+              <el-tag v-for="k in selectedFilter.extras.industries_prefer" :key="k" size="small" type="success" effect="plain">{{ k }}</el-tag>
+            </div>
+            <div><span class="cs-k">页数</span>每词条 {{ grab.max_pages }} 页</div>
+            <div style="margin-top:4px;">
+              <span class="link" @click="editSelectedFilter">编辑此条件</span>
+            </div>
+          </div>
+          <div class="field-label">每词条最多翻页数</div>
+          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" />
+        </template>
+
+        <el-button type="primary" size="large" style="width:100%; margin-top:14px;"
+                   :disabled="!canStart" :loading="starting" @click="startTask">
+          开始抓取
+        </el-button>
+        <div class="start-hint" v-if="!canStart">{{ startHint }}</div>
+      </div>
+
+      <!-- 运行状态 -->
+      <div class="card">
+        <div class="run-head">
+          <span class="dot" :class="running ? 'on' : 'off'"></span>
+          {{ running ? platformName + ' 正在抓取' : platformName + ' 空闲' }}
+          <span style="flex:1"></span>
+          <el-button v-if="running" size="small" type="warning" plain @click="stopTask">停止</el-button>
+        </div>
+        <template v-if="running || currentStatus.progress">
+          <div class="progress-text">{{ currentStatus.progress || '正在准备…' }}</div>
+          <div class="counters" v-if="currentStatus.counters">
+            <div class="counter"><div class="num">{{ currentStatus.counters.found || 0 }}</div><div class="lbl">发现</div></div>
+            <div class="counter"><div class="num" style="color:var(--el-color-primary)">{{ currentStatus.counters.saved || 0 }}</div><div class="lbl">新入库</div></div>
+            <div class="counter"><div class="num" style="color:#e6a23c">{{ currentStatus.counters.skipped || 0 }}</div><div class="lbl">跳过</div></div>
+          </div>
+        </template>
+        <div class="empty-tip" v-else>暂无进行中的任务，配置好条件后点「开始抓取」</div>
+      </div>
+
+      <!-- 最近任务 -->
+      <div class="card" style="flex:1">
+        <div class="card-title">最近任务</div>
+        <div class="task-row" v-for="t in recentTasks" :key="t.id">
+          <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status) }}</el-tag>
+          <span class="task-msg" :title="t.message">{{ t.message || '—' }}</span>
+          <span class="task-time">{{ t.status === 'done' || t.status === 'error' || t.status === 'stopped' ? fmtDate(t.finished_at || t.started_at) : '进行中' }}</span>
+        </div>
+        <div class="empty-tip" v-if="!recentTasks.length">暂无任务记录</div>
+      </div>
+    </aside>
+
+    <!-- ===================== 右栏:岗位数据 ===================== -->
+    <main class="main">
+      <!-- 筛选工具栏 -->
+      <div class="toolbar">
+        <el-select v-model="query.platform" placeholder="全部平台" clearable style="width:120px" @change="reloadJobs">
+          <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+        <el-select v-model="query.gear_id" placeholder="全部档位" clearable filterable style="width:140px" @change="reloadJobs">
+          <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+        <el-select v-model="query.fit" placeholder="全部判定" clearable style="width:110px" @change="reloadJobs">
+          <el-option label="契合" value="1" />
+          <el-option label="不符" value="0" />
+          <el-option label="未分析" value="none" />
+        </el-select>
+        <el-select v-model="query.order" style="width:130px" @change="reloadJobs">
+          <el-option label="最新入库" value="first_seen" />
+          <el-option label="最新发布" value="published" />
+          <el-option label="HR最活跃" value="hr_active" />
+        </el-select>
+        <el-input v-model="query.city" placeholder="城市筛选" clearable style="width:120px"
+                  @keyup.enter="reloadJobs" @clear="reloadJobs" />
+        <el-input v-model="query.q" placeholder="搜索职位 / 公司" clearable style="width:190px" :prefix-icon="SearchIcon">
+          <template #suffix></template>
+        </el-input>
+        <el-tooltip content="刷新列表与统计">
+          <el-button :icon="RefreshIcon" circle @click="reloadJobs" />
+        </el-tooltip>
+      </div>
+
+      <!-- 统计条 -->
+      <div class="stat-bar">
+        <div class="stat-chip" :class="{ active: !query.fit && !query.hr_online }" @click="setFit('')">
+          <span class="num">{{ stats.total }}</span><span class="lbl">全部岗位</span>
+        </div>
+        <div class="stat-chip" :class="{ active: query.fit === '1' }" title="契合判定依赖后续筛选引擎接入(TODO),暂不以上线状态判定" @click="setFit('1')">
+          <span class="num" style="color:#16a34a">{{ stats.fit }}</span><span class="lbl">契合</span>
+        </div>
+        <div class="stat-chip" :class="{ active: query.fit === '0' }" @click="setFit('0')">
+          <span class="num" style="color:#dc2626">{{ stats.unfit }}</span><span class="lbl">不符</span>
+        </div>
+        <div class="stat-chip" :class="{ active: query.fit === 'none' }" @click="setFit('none')">
+          <span class="num" style="color:#9aa0aa">{{ stats.unknown }}</span><span class="lbl">未分析</span>
+        </div>
+        <div class="stat-chip" :class="{ active: query.hr_online === 1 }" @click="toggleOnline">
+          <span class="num" style="color:#0ea5e9">{{ stats.online }}</span><span class="lbl">HR在线</span>
+        </div>
+      </div>
+
+      <!-- 岗位表格 -->
+      <div class="table-card">
+        <el-table :data="jobs.items" v-loading="loading" size="small"
+                  highlight-current-row @row-click="openDetail" style="width:100%; flex:1;">
+          <el-table-column label="判定" width="64" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.fit === true" type="success" size="small" effect="light">契合</el-tag>
+              <el-tag v-else-if="row.fit === false" type="danger" size="small" effect="light">不符</el-tag>
+              <el-tag v-else type="info" size="small" effect="light">未析</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="职位" min-width="180">
+            <template #default="{ row }">
+              <div class="job-title">{{ row.title }}</div>
+              <div class="muted">{{ row.company }}<template v-if="row.industry"> · {{ row.industry }}</template></div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="salary" label="薪资" width="110">
+            <template #default="{ row }">{{ row.salary || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="城市" width="100">
+            <template #default="{ row }">{{ row.city }}<template v-if="row.district">·{{ row.district }}</template></template>
+          </el-table-column>
+          <el-table-column label="经验/学历" width="110">
+            <template #default="{ row }"><span class="muted">{{ row.experience || '-' }}<template v-if="row.education"> / {{ row.education }}</template></span></template>
+          </el-table-column>
+          <el-table-column label="HR活跃" width="110">
+            <template #default="{ row }">
+              <el-tooltip v-if="row.hr_active_label" :content="activeTip(row)" placement="top">
+                <el-tag size="small" effect="light" :type="activeTagType(row.hr_active_label)">{{ row.hr_active_label }}</el-tag>
+              </el-tooltip>
+              <span v-else class="muted">发布 {{ fmtDate(row.published_at) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="备注(不符原因)" min-width="220">
+            <template #default="{ row }">
+              <span class="remark-cell" :title="row.remark">{{ row.remark || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="入库" width="120">
+            <template #default="{ row }"><span class="muted">{{ fmtTime(row.first_seen_at) }}</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="96" align="center">
+            <template #default="{ row }">
+              <el-tooltip content="在已登录浏览器打开" placement="top">
+                <el-button :icon="LinkIcon" circle size="small" class="op-btn" @click.stop="openJob(row)" />
+              </el-tooltip>
+              <el-popconfirm title="删除该岗位?" width="150" @confirm="delJob(row.id)">
+                <template #reference>
+                  <el-tooltip content="删除" placement="top">
+                    <el-button :icon="DeleteIcon" circle size="small" class="op-btn op-danger" @click.stop />
+                  </el-tooltip>
+                </template>
+              </el-popconfirm>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="pager">
+          <el-pagination layout="total, sizes, prev, pager, next" :total="jobs.total"
+                         :page-sizes="[20, 50, 100]" v-model:current-page="query.page"
+                         v-model:page-size="query.page_size" @current-change="loadJobs"
+                         @size-change="reloadJobs" background size="small" />
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== 左下角异常面板(持久,手动清除) ===================== -->
+  <div class="event-fab" v-if="events.length" @click="eventsOpen = !eventsOpen">
+    <span>⚠</span> 抓取异常 <span class="cnt">{{ events.length }}</span>
+  </div>
+  <div class="event-panel" v-if="events.length && eventsOpen">
+    <div class="ep-head">
+      <span>抓取异常(字段解析失败,平台可能已改版;手动清除前持久保留)</span>
+      <div style="display:flex; gap:8px;">
+        <el-button size="small" type="danger" plain @click="clearEvents">清除全部</el-button>
+        <el-button size="small" @click="eventsOpen = false">收起</el-button>
+      </div>
+    </div>
+    <div class="ep-body">
+      <div class="ep-row" v-for="e in events" :key="e.id">
+        <span class="ep-time">{{ fmtTime(e.created_at) }}</span>
+        <span class="ep-plat">{{ platformOf(e.platform) }}</span>
+        <span class="ep-msg">{{ e.message }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 岗位详情抽屉 ===================== -->
+  <el-drawer v-model="showDetail" :title="currentJob ? currentJob.title : '岗位详情'" size="52%">
+    <template v-if="currentJob">
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <el-tag v-if="currentJob.fit === true" type="success" effect="light">契合</el-tag>
+        <el-tag v-else-if="currentJob.fit === false" type="danger" effect="light">不符</el-tag>
+        <el-tag v-else type="info" effect="light">未分析</el-tag>
+        <el-tag effect="plain">{{ platformOf(currentJob.platform) }}</el-tag>
+        <el-tag v-if="currentJob.keyword" type="info" effect="plain">词条: {{ currentJob.keyword }}</el-tag>
+      </div>
+      <el-descriptions :column="2" size="small" border>
+        <el-descriptions-item label="公司">{{ currentJob.company }}</el-descriptions-item>
+        <el-descriptions-item label="薪资">{{ currentJob.salary }}<template v-if="currentJob.salary_months"> · {{ currentJob.salary_months }}薪</template></el-descriptions-item>
+        <el-descriptions-item label="城市">{{ currentJob.city }} {{ currentJob.district }}</el-descriptions-item>
+        <el-descriptions-item label="经验/学历">{{ currentJob.experience || '-' }} / {{ currentJob.education || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="行业">{{ currentJob.industry || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="阶段/规模">{{ currentJob.company_stage || '-' }} / {{ currentJob.company_scale || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="HR">{{ currentJob.hr_name }} {{ currentJob.hr_title }}</el-descriptions-item>
+        <el-descriptions-item label="HR活跃">
+          <template v-if="currentJob.hr_active_label">
+            {{ currentJob.hr_active_label }}<template v-if="currentJob.hr_active_text && currentJob.hr_active_text !== currentJob.hr_active_label">（{{ currentJob.hr_active_text }}）</template>
+          </template>
+          <template v-else>—</template>
+        </el-descriptions-item>
+        <el-descriptions-item label="发布时间">{{ fmtTime(currentJob.published_at) }}</el-descriptions-item>
+        <el-descriptions-item label="入库时间">{{ fmtTime(currentJob.first_seen_at) }}</el-descriptions-item>
+      </el-descriptions>
+      <div class="block-title">备注（不符合原因）</div>
+      <el-text type="warning" v-if="currentJob.remark">{{ currentJob.remark }}</el-text>
+      <el-text type="info" v-else>无备注（判定契合或未分析）</el-text>
+      <div class="block-title">福利标签</div>
+      <template v-if="currentJob.welfare">
+        <el-tag v-for="w in currentJob.welfare.split(/[,，;；]/)" :key="w" size="small" effect="plain" style="margin:0 6px 6px 0">{{ w.trim() }}</el-tag>
+      </template>
+      <el-text type="info" v-else>—</el-text>
+      <div class="block-title">职位描述</div>
+      <div class="drawer-desc">{{ currentJob.description || '（未抓取到描述）' }}</div>
+      <div style="margin-top:16px; display:flex; gap:10px;">
+        <el-button type="primary" @click="openJob(currentJob)">在已登录浏览器打开</el-button>
+        <el-popconfirm title="确认删除该岗位?" width="160" @confirm="delJob(currentJob.id)">
+          <template #reference><el-button type="danger" plain>删除</el-button></template>
+        </el-popconfirm>
+      </div>
+    </template>
+  </el-drawer>
+
+  <!-- ===================== 档位管理 ===================== -->
+  <el-dialog v-model="gearVisible" title="岗位档位管理" width="680px">
+    <div class="card-title" style="margin-bottom:10px;">{{ gearForm.id ? '编辑档位' : '新建档位' }}</div>
+    <el-form label-width="80px" style="margin-bottom:8px;">
+      <el-form-item label="档位名">
+        <el-input v-model="gearForm.name" placeholder="如: Java后端" style="width:240px" />
+      </el-form-item>
+      <el-form-item label="岗位词条">
+        <el-select v-model="gearForm.keywords" multiple filterable allow-create default-first-option
+                   placeholder="输入词条后回车,如: Java / Java开发 / 服务端" style="width:100%" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" @click="saveGear">{{ gearForm.id ? '更新档位' : '添加档位' }}</el-button>
+        <el-button v-if="gearForm.id" @click="resetGearForm">取消编辑</el-button>
+      </el-form-item>
+    </el-form>
+    <el-table :data="gears" size="small" border>
+      <el-table-column prop="name" label="标签" width="150" />
+      <el-table-column label="词条">
+        <template #default="{ row }">
+          <el-tag v-for="k in row.keywords" :key="k" size="small" effect="plain" style="margin:2px">{{ k }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="130" align="center">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="gearForm = JSON.parse(JSON.stringify(row))">编辑</el-button>
+          <el-button link type="danger" size="small" @click="delGear(row.id)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-dialog>
+
+  <!-- ===================== 筛选条件管理 ===================== -->
+  <el-dialog v-model="filterVisible" title="筛选条件管理" width="760px" top="6vh">
+    <el-table :data="filters" size="small" border class="mb8">
+      <el-table-column label="平台" width="90">
+        <template #default="{ row }">{{ platformOf(row.platform) }}</template>
+      </el-table-column>
+      <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+      <el-table-column label="城市" width="80">
+        <template #default="{ row }">{{ row.city || '全国' }}</template>
+      </el-table-column>
+      <el-table-column label="档位" width="110">
+        <template #default="{ row }">{{ row.gear_id ? gearName(row.gear_id) : '—' }}</template>
+      </el-table-column>
+      <el-table-column prop="keyword" label="词条" min-width="90" show-overflow-tooltip />
+      <el-table-column label="避开行业" min-width="110">
+        <template #default="{ row }">
+          <el-tag v-for="k in (row.extras.industries_avoid || [])" :key="k" size="small" type="danger" effect="plain" style="margin:2px">{{ k }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="优先行业" min-width="110">
+        <template #default="{ row }">
+          <el-tag v-for="k in (row.extras.industries_prefer || [])" :key="k" size="small" type="success" effect="plain" style="margin:2px">{{ k }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="110" align="center" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="editFilter(row)">编辑</el-button>
+          <el-button link type="danger" size="small" @click="delFilter(row.id)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-divider content-position="left">{{ filterForm.id ? '编辑条件 #' + filterForm.id : '新建条件' }}</el-divider>
+    <el-form label-width="90px">
+      <el-form-item label="平台">
+        <el-select v-model="filterForm.platform" :disabled="!!filterForm.id" style="width:180px">
+          <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+        <span class="muted" style="margin-left:8px" v-if="filterForm.id">编辑时平台不可更改</span>
+      </el-form-item>
+      <el-form-item label="条件名"><el-input v-model="filterForm.name" style="width:280px" /></el-form-item>
+      <el-form-item label="城市"><el-input v-model="filterForm.city" placeholder="如: 上海(留空 = 全国)" style="width:280px" clearable /></el-form-item>
+      <el-form-item label="岗位档位">
+        <el-select v-model="filterForm.gear_id" clearable filterable style="width:280px" placeholder="选择档位(可空)">
+          <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="限定词条"><el-input v-model="filterForm.keyword" placeholder="留空则按档位全部词条抓取" style="width:280px" clearable /></el-form-item>
+      <el-form-item label="避开行业">
+        <el-select v-model="filterForm.industries_avoid" multiple filterable allow-create default-first-option
+                   placeholder="输入行业关键词后回车,如: 电商 / 金融 / 游戏" style="width:100%" />
+      </el-form-item>
+      <el-form-item label="优先行业">
+        <el-select v-model="filterForm.industries_prefer" multiple filterable allow-create default-first-option
+                   placeholder="输入行业关键词后回车,如: 制造业 / 医疗" style="width:100%" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" @click="saveFilter">{{ filterForm.id ? '更新条件' : '保存条件' }}</el-button>
+        <el-button @click="resetFilterForm">清空表单</el-button>
+      </el-form-item>
+    </el-form>
+  </el-dialog>
+</div>
+<script src="/assets/app.js"></script>
+</body>
+</html>

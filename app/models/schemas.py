@@ -1,0 +1,106 @@
+"""Pydantic 请求/响应模型。"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+PLATFORMS = ("boss", "job51", "liepin")
+
+
+class GearIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    keywords: list[str] = Field(default_factory=list)
+
+
+class GearOut(GearIn):
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SearchFilterIn(BaseModel):
+    platform: str
+    name: str = "默认条件"
+    city: str = ""
+    gear_id: Optional[int] = None
+    keyword: str = ""
+    extras: dict[str, Any] = Field(default_factory=dict)
+
+
+class SearchFilterOut(SearchFilterIn):
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TaskOut(BaseModel):
+    id: int
+    platform: str
+    status: str
+    message: str
+    found: int
+    saved: int
+    skipped: int
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    filter_snapshot: dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        from_attributes = True
+
+
+class JobOut(BaseModel):
+    id: int
+    platform: str
+    platform_job_id: str
+    title: str
+    company: str
+    salary: str
+    salary_months: Optional[int] = None
+    city: str
+    district: str
+    experience: str
+    education: str
+    description: str
+    company_intro: str
+    hr_name: str
+    hr_title: str
+    hr_active_at: Optional[str] = None       # 估算字符串,后缀携带方向:"…后/…前/…活跃/无"
+    hr_active_text: str = ""                 # 平台原始活跃文案
+    hr_active_label: str = ""                # 由估算规则生成的状态标签(接口层填充)
+    published_at: Optional[datetime] = None
+    url: str
+    gear_id: Optional[int] = None
+    keyword: str
+    industry: str = ""
+    company_stage: str = ""
+    company_scale: str = ""
+    welfare: str = ""
+    hr_online: Optional[bool] = None
+    remark: str
+    fit: Optional[bool] = None
+    fit_score: Optional[float] = None
+    first_seen_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class JobPage(BaseModel):
+    total: int
+    items: list[JobOut]
+
+
+class StartTaskIn(BaseModel):
+    platform: str
+    filter_id: Optional[int] = None
+    max_pages: Optional[int] = None
+    keyword: Optional[str] = None
+    city: Optional[str] = None
