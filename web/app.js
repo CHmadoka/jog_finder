@@ -85,7 +85,7 @@ const app = createApp({
     const startHint = computed(() => {
       if (canStart.value) return "";
       if (grab.mode === "saved") return "请先选择一个已存条件";
-      return "请先选择岗位档位,或填写限定词条";
+      return "请先选择岗位设置,或填写限定词条";
     });
     // 表头排序指示器的受控状态(与 query.sort_by/sort_order 同步)
     const SORT_PROP = { updated: "updated_at", published: "published_at", hr_active: "hr_active_at", city: "city", exp_edu: "experience" };
@@ -125,7 +125,7 @@ const app = createApp({
         || PLATFORM_NAMES[pid] || pid;
     }
     function gearName(gid) {
-      return (gears.value.find((g) => g.id === gid) || {}).name || "档位#" + gid;
+      return (gears.value.find((g) => g.id === gid) || {}).name || "设置#" + gid;
     }
     function isRunning(pid) {
       const s = statuses[pid];
@@ -317,7 +317,7 @@ const app = createApp({
       ElMessage.info("已发送停止指令");
     }
 
-    // ---------- 档位管理 ----------
+    // ---------- 岗位设置管理 ----------
     function openGearDialog() {
       gearVisible.value = true;
       loadGears();
@@ -325,9 +325,12 @@ const app = createApp({
     function resetGearForm() {
       gearForm.id = null; gearForm.name = ""; gearForm.keywords = [];
     }
+    function editGear(row) {
+      Object.assign(gearForm, { id: row.id, name: row.name, keywords: [...(row.keywords || [])] });
+    }
     async function saveGear() {
-      if (!gearForm.name.trim()) return ElMessage.warning("请填写档位名");
-      await api("/gears", {
+      if (!gearForm.name.trim()) return ElMessage.warning("请填写设置名");
+      await api("/gears" + (gearForm.id ? `/${gearForm.id}` : ""), {
         method: gearForm.id ? "PUT" : "POST",
         body: { name: gearForm.name.trim(), keywords: gearForm.keywords },
       });
@@ -337,7 +340,7 @@ const app = createApp({
     }
     async function delGear(id) {
       await ElMessageBox.confirm(
-        "删除档位不影响已入库岗位与条件,确定删除?", "删除档位", { type: "warning" }
+        "删除设置不影响已入库岗位与条件,确定删除?", "删除设置", { type: "warning" }
       );
       await api(`/gears/${id}`, { method: "DELETE" });
       ElMessage.success("已删除");
@@ -420,15 +423,25 @@ const app = createApp({
     // ---------- 数据表管理 ----------
     function openTableDialog() {
       tableVisible.value = true;
+      resetTableForm();
       loadTables();
     }
     function resetTableForm() {
       tableForm.id = null; tableForm.name = ""; tableForm.slug = "";
     }
+    function editTable(row) {
+      Object.assign(tableForm, { id: row.id, name: row.name, slug: row.slug });
+    }
+    async function createTable() {
+      // 表名留空 → 后端自动命名「数据表_id」
+      await api("/tables", { method: "POST", body: { name: "", slug: "" } });
+      ElMessage.success("已新建数据表");
+      loadTables();
+    }
     async function saveTable() {
       if (!tableForm.name.trim()) return ElMessage.warning("请填写表名");
-      await api("/tables", {
-        method: tableForm.id ? "PUT" : "POST",
+      await api(`/tables/${tableForm.id}`, {
+        method: "PUT",
         body: { name: tableForm.name.trim(), slug: tableForm.slug.trim() },
       });
       ElMessage.success("已保存");
@@ -508,7 +521,7 @@ const app = createApp({
     }
     async function clearAll() {
       await ElMessageBox.confirm(
-        "将删除全部已抓取岗位数据(档位与条件保留),且不可恢复。确定清空?",
+        "将删除全部已抓取岗位数据(设置与条件保留),且不可恢复。确定清空?",
         "清空岗位库", { type: "warning", confirmButtonText: "清空", cancelButtonText: "取消" }
       );
       const r = await api("/jobs/clear_all", { method: "POST", body: {} });
@@ -518,7 +531,6 @@ const app = createApp({
     function onMenu(cmd) {
       if (cmd === "gears") openGearDialog();
       else if (cmd === "filters") openFilterDialog();
-      else if (cmd === "tables") openTableDialog();
       else if (cmd === "export") exportJobs();
       else if (cmd === "refresh_active") refreshActive();
       else if (cmd === "clear") clearAll();
@@ -576,9 +588,9 @@ const app = createApp({
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
       onSortChange, toggleSortOrder, onTableChange,
-      openGearDialog, resetGearForm, saveGear, delGear,
+      openGearDialog, resetGearForm, editGear, saveGear, delGear,
       openFilterDialog, resetFilterForm, editFilter, editSelectedFilter, saveFilter, delFilter,
-      openTableDialog, resetTableForm, saveTable, clearTable, delTable,
+      openTableDialog, resetTableForm, editTable, createTable, saveTable, clearTable, delTable,
       openDetail, openJob, delJob, exportJobs, clearAll, onMenu,
     };
   },

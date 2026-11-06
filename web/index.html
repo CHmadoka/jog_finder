@@ -111,6 +111,32 @@
     .cond-summary .el-tag { margin-right: 4px; }
 
     .start-hint { font-size: 12px; color: #e6a23c; margin-top: 8px; text-align: center; }
+    /* ---------- 工具栏组合框(数据表下拉 + 设置) ---------- */
+    .table-combo {
+      display: inline-flex; align-items: center;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--card); height: 32px; overflow: hidden;
+    }
+    .table-combo .el-select__wrapper { box-shadow: none !important; background: transparent; min-height: 30px; }
+    .table-combo .combo-setting {
+      border-left: 1px solid var(--border); border-radius: 0; height: 30px;
+      color: var(--text2); margin-left: 2px;
+    }
+    .table-combo .combo-tag { margin: 0 2px 0 -6px; flex-shrink: 0; }
+
+    /* 弹窗内轻量表格:去网格重边框,表头弱化 */
+    .dlg-table {
+      --el-table-border-color: transparent;
+      --el-table-header-bg-color: transparent;
+      --el-table-header-text-color: var(--text3);
+      --el-table-row-hover-bg-color: #f7f8fc;
+      --el-table-tr-bg-color: transparent;
+    }
+    .dlg-table .el-table__inner-wrapper::before { display: none; }
+    .dlg-table th.el-table__cell > .cell { font-weight: 500; font-size: 12px; }
+    .dlg-table td.el-table__cell { border-bottom: 1px solid #f0f1f6; }
+    .dlg-table .el-table__cell { padding: 7px 0; }
+
     .k-unit { color: #f59e0b; font-weight: 700; font-size: 13px; }
 
     /* ---------- 运行状态 ---------- */
@@ -228,9 +254,8 @@
       </el-button>
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item command="gears">岗位档位管理</el-dropdown-item>
+          <el-dropdown-item command="gears">岗位设置管理</el-dropdown-item>
           <el-dropdown-item command="filters">筛选条件管理</el-dropdown-item>
-          <el-dropdown-item command="tables">数据表管理</el-dropdown-item>
           <el-dropdown-item command="export" divided>导出 Excel（当前筛选平台）</el-dropdown-item>
           <el-dropdown-item command="refresh_active">补全HR活跃（旧数据修复）</el-dropdown-item>
           <el-dropdown-item command="clear">清空岗位库…</el-dropdown-item>
@@ -262,10 +287,10 @@
         <!-- 快速抓取 -->
         <template v-if="grab.mode === 'quick'">
           <div class="field-label">
-            岗位档位
-            <span class="link" @click="openGearDialog">管理档位</span>
+            岗位设置
+            <span class="link" @click="openGearDialog">管理设置</span>
           </div>
-          <el-select v-model="grab.gear_id" placeholder="选择档位(一次跑其全部词条)" filterable style="width:100%">
+          <el-select v-model="grab.gear_id" placeholder="选择设置(一次跑其全部词条)" filterable style="width:100%">
             <el-option v-for="g in gears" :key="g.id" :value="g.id"
                        :label="g.name + ' · ' + (g.keywords || []).length + ' 个词条'">
               <span>{{ g.name }}</span>
@@ -280,7 +305,7 @@
             限定词条(可选)
             <span class="link" @click="grab.keyword = ''" v-if="grab.keyword">清除</span>
           </div>
-          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词,留空跑档位全部词条" clearable />
+          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词,留空跑设置全部词条" clearable />
 
           <div class="field-label">每词条最多翻页数</div>
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" />
@@ -300,8 +325,8 @@
           </div>
           <div class="cond-summary" v-if="selectedFilter">
             <div><span class="cs-k">城市</span>{{ selectedFilter.city || '全国' }}</div>
-            <div><span class="cs-k">档位</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联档位' }}</div>
-            <div><span class="cs-k">词条</span>{{ selectedFilter.keyword || '(按档位全部词条抓取)' }}</div>
+            <div><span class="cs-k">设置</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联设置' }}</div>
+            <div><span class="cs-k">词条</span>{{ selectedFilter.keyword || '(按设置全部词条抓取)' }}</div>
             <div><span class="cs-k">薪资</span>{{ fmtSalaryRange(selectedFilter.extras.salary) }}</div>
             <div v-if="(selectedFilter.extras.industries_avoid || []).length">
               <span class="cs-k">避开</span>
@@ -375,14 +400,17 @@
 
     <!-- ===================== 右栏:岗位数据 ===================== -->
     <main class="main">
-      <!-- 筛选工具栏:数据表(当前工作表)居首 -->
+      <!-- 筛选工具栏:数据表(当前工作表)居首,设置入口内嵌组合框 -->
       <div class="toolbar">
-        <el-select v-model="query.table_id" style="width:150px" @change="onTableChange">
-          <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name" />
-        </el-select>
-        <el-tooltip content="管理数据表(新建 / 重命名 / 清空 / 删除)" placement="top">
-          <el-button :icon="SettingIcon" circle @click="openTableDialog" />
-        </el-tooltip>
+        <div class="table-combo">
+          <el-select v-model="query.table_id" style="width:128px" @change="onTableChange">
+            <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name" />
+          </el-select>
+          <el-tag v-if="(query.table_id || 1) === 1" size="small" type="info" effect="plain" class="combo-tag">默认</el-tag>
+          <el-tooltip content="管理数据表(新建 / 重命名 / 清空 / 删除)" placement="top">
+            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTableDialog" />
+          </el-tooltip>
+        </div>
         <el-select v-model="query.platform" placeholder="全部平台" clearable style="width:120px" @change="reloadJobs">
           <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id" />
         </el-select>
@@ -536,11 +564,11 @@
     </template>
   </el-drawer>
 
-  <!-- ===================== 档位管理 ===================== -->
-  <el-dialog v-model="gearVisible" title="岗位档位管理" width="680px">
-    <div class="card-title" style="margin-bottom:10px;">{{ gearForm.id ? '编辑档位' : '新建档位' }}</div>
+  <!-- ===================== 岗位设置管理 ===================== -->
+  <el-dialog v-model="gearVisible" title="岗位设置管理" width="680px">
+    <div class="card-title" style="margin-bottom:10px;">{{ gearForm.id ? '编辑设置' : '新建设置' }}</div>
     <el-form label-width="80px" style="margin-bottom:8px;">
-      <el-form-item label="档位名">
+      <el-form-item label="设置名">
         <el-input v-model="gearForm.name" placeholder="如: Java后端" style="width:240px" />
       </el-form-item>
       <el-form-item label="岗位词条">
@@ -548,12 +576,12 @@
                    placeholder="输入词条后回车,如: Java / Java开发 / 服务端" style="width:100%" />
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="saveGear">{{ gearForm.id ? '更新档位' : '添加档位' }}</el-button>
+        <el-button type="primary" @click="saveGear">{{ gearForm.id ? '更新设置' : '添加设置' }}</el-button>
         <el-button v-if="gearForm.id" @click="resetGearForm">取消编辑</el-button>
       </el-form-item>
     </el-form>
-    <el-table :data="gears" size="small" border>
-      <el-table-column prop="name" label="标签" width="150" />
+    <el-table :data="gears" size="small" class="dlg-table">
+      <el-table-column prop="name" label="名称" width="150" />
       <el-table-column label="词条">
         <template #default="{ row }">
           <el-tag v-for="k in row.keywords" :key="k" size="small" effect="plain" style="margin:2px">{{ k }}</el-tag>
@@ -561,7 +589,7 @@
       </el-table-column>
       <el-table-column label="操作" width="130" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="gearForm = JSON.parse(JSON.stringify(row))">编辑</el-button>
+          <el-button link type="primary" size="small" @click="editGear(row)">编辑</el-button>
           <el-button link type="danger" size="small" @click="delGear(row.id)">删除</el-button>
         </template>
       </el-table-column>
@@ -570,7 +598,7 @@
 
   <!-- ===================== 筛选条件管理 ===================== -->
   <el-dialog v-model="filterVisible" title="筛选条件管理" width="760px" top="6vh">
-    <el-table :data="filters" size="small" border class="mb8">
+    <el-table :data="filters" size="small" class="dlg-table mb8">
       <el-table-column label="平台" width="90">
         <template #default="{ row }">{{ platformOf(row.platform) }}</template>
       </el-table-column>
@@ -578,7 +606,7 @@
       <el-table-column label="城市" width="80">
         <template #default="{ row }">{{ row.city || '全国' }}</template>
       </el-table-column>
-      <el-table-column label="档位" width="110">
+      <el-table-column label="设置" width="110">
         <template #default="{ row }">{{ row.gear_id ? gearName(row.gear_id) : '—' }}</template>
       </el-table-column>
       <el-table-column prop="keyword" label="词条" min-width="90" show-overflow-tooltip />
@@ -613,12 +641,12 @@
       </el-form-item>
       <el-form-item label="条件名"><el-input v-model="filterForm.name" style="width:280px" /></el-form-item>
       <el-form-item label="城市"><el-input v-model="filterForm.city" placeholder="如: 上海(留空 = 全国)" style="width:280px" clearable /></el-form-item>
-      <el-form-item label="岗位档位">
-        <el-select v-model="filterForm.gear_id" clearable filterable style="width:280px" placeholder="选择档位(可空)">
+      <el-form-item label="岗位设置">
+        <el-select v-model="filterForm.gear_id" clearable filterable style="width:280px" placeholder="选择设置(可空)">
           <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="限定词条"><el-input v-model="filterForm.keyword" placeholder="留空则按档位全部词条抓取" style="width:280px" clearable /></el-form-item>
+      <el-form-item label="限定词条"><el-input v-model="filterForm.keyword" placeholder="留空则按设置全部词条抓取" style="width:280px" clearable /></el-form-item>
       <el-form-item label="薪资范围">
         <div style="display:flex; gap:8px; align-items:center; width:280px;">
           <el-input v-model="filterForm.salary_min" placeholder="最低" clearable>
@@ -647,22 +675,27 @@
 
   <!-- ===================== 数据表管理 ===================== -->
   <el-dialog v-model="tableVisible" title="数据表管理" width="620px">
-    <div class="card-title" style="margin-bottom:10px;">{{ tableForm.id ? '编辑数据表' : '新建数据表' }}</div>
-    <el-form label-width="80px" style="margin-bottom:8px;">
+    <div v-if="!tableForm.id" style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+      <el-button type="primary" @click="createTable">新建数据表</el-button>
+      <span class="muted">自动命名为「数据表_id」,可在列表中重命名</span>
+    </div>
+    <div v-else class="card-title" style="margin-bottom:10px;">重命名数据表 #{{ tableForm.id }}</div>
+    <el-form v-if="tableForm.id" label-width="80px" style="margin-bottom:10px;">
       <el-form-item label="表名">
-        <el-input v-model="tableForm.name" placeholder="如: 武汉-后端" style="width:240px" />
+        <el-input v-model="tableForm.name" style="width:240px" @keyup.enter="saveTable" />
       </el-form-item>
       <el-form-item label="标识符">
-        <el-input v-model="tableForm.slug" placeholder="留空自动生成,如 tbl_2(仅字母数字-_)" style="width:240px" />
+        <el-input v-model="tableForm.slug" style="width:240px" />
+        <span class="muted" style="margin-left:8px">一般无需修改</span>
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="saveTable">{{ tableForm.id ? '更新' : '新建' }}</el-button>
-        <el-button v-if="tableForm.id" @click="resetTableForm">取消编辑</el-button>
+        <el-button type="primary" @click="saveTable">保存</el-button>
+        <el-button @click="resetTableForm">取消</el-button>
       </el-form-item>
     </el-form>
-    <el-table :data="tables" size="small" border>
+    <el-table :data="tables" size="small" class="dlg-table">
       <el-table-column prop="id" label="ID" width="60" align="center" />
-      <el-table-column prop="name" label="表名" min-width="140">
+      <el-table-column prop="name" label="表名" min-width="150">
         <template #default="{ row }">
           {{ row.name }}
           <el-tag v-if="row.id === 1" size="small" type="info" effect="plain" style="margin-left:6px">默认</el-tag>
@@ -672,7 +705,7 @@
       <el-table-column prop="job_count" label="岗位数" width="80" align="center" />
       <el-table-column label="操作" width="170" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="tableForm = { id: row.id, name: row.name, slug: row.slug }">编辑</el-button>
+          <el-button link type="primary" size="small" @click="editTable(row)">编辑</el-button>
           <el-button link type="warning" size="small" :disabled="!row.job_count" @click="clearTable(row)">清空</el-button>
           <el-button link type="danger" size="small" :disabled="row.id === 1"
                      :title="row.id === 1 ? '默认表不可删除' : ''" @click="delTable(row)">删除</el-button>

@@ -105,7 +105,7 @@ class JobPage(BaseModel):
 
 
 class TableIn(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: str = Field(default="", max_length=100)   # 缺省时自动命名 数据表_{id}
     slug: str = Field(default="", max_length=100)
 
 

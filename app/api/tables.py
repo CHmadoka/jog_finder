@@ -38,19 +38,19 @@ def list_tables(db: Session = Depends(get_session)):
 
 @router.post("")
 def create_table(body: TableIn, db: Session = Depends(get_session)):
+    """新建数据表:表名可缺省,自动命名为 数据表_{id}(可稍后重命名)。"""
     name = (body.name or "").strip()
-    if not name:
-        raise HTTPException(400, "表名不能为空")
-    if db.query(JobTable).filter(JobTable.name == name).first():
+    if name and db.query(JobTable).filter(JobTable.name == name).first():
         raise HTTPException(409, f"表名已存在: {name}")
     slug = (body.slug or "").strip()
     if slug and db.query(JobTable).filter(JobTable.slug == slug).first():
         raise HTTPException(409, f"标识符已存在: {slug}")
-    row = JobTable(name=name, slug=slug or "__pending__")
+    row = JobTable(name=name or "__pending__", slug=slug or "__pending__")
     db.add(row)
     db.flush()          # 取自增 id(未提交)
+    if not name:
+        row.name = f"数据表_{row.id}"
     if not slug:
-        # 未提供标识符时自动生成稳定 slug:tbl_{id}
         row.slug = f"tbl_{row.id}"
     db.commit()
     db.refresh(row)
