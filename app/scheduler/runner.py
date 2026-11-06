@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from sqlalchemy import or_
 
@@ -96,21 +97,6 @@ def _db_finish_task(task_id: int, status: str, message: str, counters: dict) -> 
             db.commit()
 
 
-def _db_exists_touch(platform: str, job_id: str, hr_active_at) -> bool:
-    """查重;已存在则顺带刷新活跃时间。返回 True 表示已存在。"""
-    with SessionLocal() as db:
-        exists = (
-            db.query(Job)
-            .filter(Job.platform == platform, Job.platform_job_id == job_id)
-            .first()
-        )
-        if exists:
-            exists.hr_active_at = hr_active_at or exists.hr_active_at
-            db.commit()
-            return True
-    return False
-
-
 # 已存在岗位可被列表数据更新的字段(不打开详情页也能拿到;空值不覆盖,避免解析失败污染)
 _REFRESH_FIELDS = (
     "title", "company", "salary", "salary_months", "city", "district",
@@ -120,16 +106,26 @@ _REFRESH_FIELDS = (
 )
 
 
+class UpsertResult(NamedTuple):
+    """重复岗位处理结果。
+
+    exists 与 changed 解耦:岗位已存在但字段无变化时 changed=0,
+    仍不是新岗位——调用方以 exists 判定,避免"返回 0 = 不存在"的歧义
+    把无变化的重复岗位误判为新岗位而重复 INSERT。
+    """
+
+    exists: bool
+    changed: int
+
+
 def _db_update_existing(
     platform: str, job_id: str, draft: JobDraft, task_id: int | None = None
-) -> int:
+) -> UpsertResult:
     """重复岗位:只更新有变化的字段(活跃估算/薪资/行业等),不重复入库。
 
-    返回值:命中时 >= 0(值为发生变化的字段数,可为 0 = 无字段变化);
-    未命中返回 -1。调用方据此区分"已存在"与"不存在",避免把无变化的
-    重复岗位误判为新岗位而重复 INSERT(唯一键冲突会让整个任务中断)。
-
-    有变化时把 crawl_task_id 更新为本次任务(外键语义:最后更新该岗位的抓取)。
+    返回 UpsertResult:exists 标识岗位是否已存在,changed 为发生变化的
+    字段数;有变化时把 crawl_task_id 更新为本次任务
+    (外键语义:最后更新该岗位的抓取)。
     """
     with SessionLocal() as db:
         row = (
@@ -138,7 +134,7 @@ def _db_update_existing(
             .first()
         )
         if not row:
-            return -1
+            return UpsertResult(exists=False, changed=0)
         changed = 0
         for f in _REFRESH_FIELDS:
             new = getattr(draft, f, None)
@@ -168,7 +164,7 @@ def _db_update_existing(
             if task_id:
                 row.crawl_task_id = task_id
             db.commit()
-        return changed
+        return UpsertResult(exists=True, changed=changed)
 
 
 def _db_load_missing_active(platform: str) -> list[dict]:
@@ -726,13 +722,13 @@ class Scheduler:
             progress(f"跳过「{draft.title}」: 详情页被平台拦截(空白页),见异常面板")
             bump("被平台拦截")
             return "skipped"
-        exists = await asyncio.to_thread(
+        up = await asyncio.to_thread(
             _db_update_existing, plat.id, draft.platform_job_id, draft, task_id
         )
-        if exists >= 0:
+        if up.exists:
             # 已存在:仅更新有变化的字段,不重复入库(需求:比对是否已存在)
-            if exists > 0:
-                progress(f"已存在「{draft.title}」: 同步更新{exists}个字段")
+            if up.changed > 0:
+                progress(f"已存在「{draft.title}」: 同步更新{up.changed}个字段")
             else:
                 progress(f"跳过「{draft.title}」: 已存在,无字段变化")
             bump("已存在")
