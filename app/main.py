@@ -55,8 +55,27 @@ def health() -> dict:
     return {"ok": True, "llm": config.llm_enabled}
 
 
+def _port_in_use(host: str, port: int, timeout: float = 1.0) -> bool:
+    """探测服务端口是否已被占用(单例守卫)。"""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        return s.connect_ex((host, port)) == 0
+
+
 def main() -> None:
     import uvicorn
+
+    # 单例守卫:端口已被监听说明服务已在运行,直接退出而非报绑定错误。
+    # 注意 .venv\Scripts\python.exe 是启动器壳,还会派生基础解释器子进程,
+    # 任务管理器里一个服务会显示为两个 python.exe,属正常现象。
+    if _port_in_use(config.HOST, config.PORT):
+        print(
+            f"[job_finder] 服务已在运行: http://{config.HOST}:{config.PORT}"
+            "(单例模式,本次启动直接退出)"
+        )
+        return
 
     uvicorn.run("app.main:app", host=config.HOST, port=config.PORT, reload=False)
 
