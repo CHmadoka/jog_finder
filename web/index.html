@@ -122,20 +122,28 @@
       border-left: 1px solid var(--border); border-radius: 0; height: 30px;
       color: var(--text2); margin-left: 2px;
     }
-    .table-combo .combo-tag { margin: 0 2px 0 -6px; flex-shrink: 0; }
+    .combo-select-wrap { position: relative; display: flex; min-width: 0; }
+    .combo-inner-tag {
+      position: absolute; right: 26px; top: 50%; transform: translateY(-50%);
+      pointer-events: none; z-index: 5;
+    }
+    .table-combo.with-tag .el-select__selection { padding-right: 48px; }
 
-    /* 弹窗内轻量表格:去网格重边框,表头弱化 */
+    /* 弹窗内轻量表格:无网格线,表头仅一行灰字 + 细底线 */
     .dlg-table {
       --el-table-border-color: transparent;
       --el-table-header-bg-color: transparent;
       --el-table-header-text-color: var(--text3);
       --el-table-row-hover-bg-color: #f7f8fc;
-      --el-table-tr-bg-color: transparent;
+      --el-table-tr-bg-color: #fff;
     }
     .dlg-table .el-table__inner-wrapper::before { display: none; }
-    .dlg-table th.el-table__cell > .cell { font-weight: 500; font-size: 12px; }
-    .dlg-table td.el-table__cell { border-bottom: 1px solid #f0f1f6; }
-    .dlg-table .el-table__cell { padding: 7px 0; }
+    .dlg-table th.el-table__cell { background: transparent !important; border-bottom: none !important; padding: 2px 0 6px; }
+    .dlg-table th.el-table__cell > .cell { font-weight: 500; font-size: 12px; color: var(--text3); }
+    .dlg-table .el-table__header-wrapper { border-bottom: 1px solid var(--border); }
+    .dlg-table td.el-table__cell { border-bottom: 1px solid #f3f4f8; }
+    .dlg-table .el-table__cell { padding: 8px 0; }
+    .dlg-table .el-table__empty-block { background: transparent; }
 
     .k-unit { color: #f59e0b; font-weight: 700; font-size: 13px; }
 
@@ -258,7 +266,6 @@
           <el-dropdown-item command="filters">筛选条件管理</el-dropdown-item>
           <el-dropdown-item command="export" divided>导出 Excel（当前筛选平台）</el-dropdown-item>
           <el-dropdown-item command="refresh_active">补全HR活跃（旧数据修复）</el-dropdown-item>
-          <el-dropdown-item command="clear">清空岗位库…</el-dropdown-item>
         </el-dropdown-menu>
       </template>
     </el-dropdown>
@@ -286,17 +293,20 @@
 
         <!-- 快速抓取 -->
         <template v-if="grab.mode === 'quick'">
-          <div class="field-label">
-            岗位设置
-            <span class="link" @click="openGearDialog">管理设置</span>
+          <div class="field-label">岗位设置</div>
+          <div class="table-combo" style="width:100%">
+            <el-select v-model="grab.gear_id" placeholder="选择设置(一次跑其全部词条)" filterable
+                       style="flex:1; min-width:0">
+              <el-option v-for="g in gears" :key="g.id" :value="g.id"
+                         :label="g.name + ' · ' + (g.keywords || []).length + ' 个词条'">
+                <span>{{ g.name }}</span>
+                <span style="float:right; color:#9aa0aa; font-size:12px">{{ (g.keywords || []).join(' / ') }}</span>
+              </el-option>
+            </el-select>
+            <el-tooltip content="管理岗位设置" placement="top">
+              <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openGearDialog" />
+            </el-tooltip>
           </div>
-          <el-select v-model="grab.gear_id" placeholder="选择设置(一次跑其全部词条)" filterable style="width:100%">
-            <el-option v-for="g in gears" :key="g.id" :value="g.id"
-                       :label="g.name + ' · ' + (g.keywords || []).length + ' 个词条'">
-              <span>{{ g.name }}</span>
-              <span style="float:right; color:#9aa0aa; font-size:12px">{{ (g.keywords || []).join(' / ') }}</span>
-            </el-option>
-          </el-select>
 
           <div class="field-label">城市</div>
           <el-input v-model="grab.city" placeholder="如:武汉(留空 = 全国)" clearable />
@@ -402,11 +412,14 @@
     <main class="main">
       <!-- 筛选工具栏:数据表(当前工作表)居首,设置入口内嵌组合框 -->
       <div class="toolbar">
-        <div class="table-combo">
-          <el-select v-model="query.table_id" style="width:128px" @change="onTableChange">
-            <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name" />
-          </el-select>
-          <el-tag v-if="(query.table_id || 1) === 1" size="small" type="info" effect="plain" class="combo-tag">默认</el-tag>
+        <div class="table-combo with-tag">
+          <div class="combo-select-wrap">
+            <el-select v-model="query.table_id" style="width:128px" @change="onTableChange">
+              <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name" />
+            </el-select>
+            <el-tag v-if="(query.table_id || 1) === 1" size="small" type="info" effect="plain"
+                    class="combo-inner-tag">默认</el-tag>
+          </div>
           <el-tooltip content="管理数据表(新建 / 重命名 / 清空 / 删除)" placement="top">
             <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTableDialog" />
           </el-tooltip>
@@ -677,7 +690,7 @@
   <el-dialog v-model="tableVisible" title="数据表管理" width="620px">
     <div v-if="!tableForm.id" style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
       <el-button type="primary" @click="createTable">新建数据表</el-button>
-      <span class="muted">自动命名为「数据表_id」,可在列表中重命名</span>
+      <span class="muted">自动命名为「新数据表_n」,标识符自动取「数据表_id」,可稍后重命名</span>
     </div>
     <div v-else class="card-title" style="margin-bottom:10px;">重命名数据表 #{{ tableForm.id }}</div>
     <el-form v-if="tableForm.id" label-width="80px" style="margin-bottom:10px;">

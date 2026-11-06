@@ -532,21 +532,11 @@ const app = createApp({
       const pid = query.platform ? `?platform=${query.platform}` : "";
       window.open("/api/export" + pid, "_blank");
     }
-    async function clearAll() {
-      await ElMessageBox.confirm(
-        "将删除全部已抓取岗位数据(设置与条件保留),且不可恢复。确定清空?",
-        "清空岗位库", { type: "warning", confirmButtonText: "清空", cancelButtonText: "取消" }
-      );
-      const r = await api("/jobs/clear_all", { method: "POST", body: {} });
-      ElMessage.success(`已清空 ${r.deleted} 条岗位`);
-      reloadJobs();
-    }
     function onMenu(cmd) {
       if (cmd === "gears") openGearDialog();
       else if (cmd === "filters") openFilterDialog();
       else if (cmd === "export") exportJobs();
       else if (cmd === "refresh_active") refreshActive();
-      else if (cmd === "clear") clearAll();
     }
     async function refreshActive() {
       try {
@@ -604,7 +594,7 @@ const app = createApp({
       openGearDialog, resetGearForm, editGear, saveGear, delGear,
       openFilterDialog, resetFilterForm, editFilter, editSelectedFilter, saveFilter, delFilter,
       openTableDialog, resetTableForm, editTable, createTable, saveTable, clearTable, delTable,
-      openDetail, openJob, delJob, exportJobs, clearAll, onMenu,
+      openDetail, openJob, delJob, exportJobs, onMenu,
     };
   },
 });

@@ -200,14 +200,3 @@ def delete_job(job_id: int, db: Session = Depends(get_session)):
     db.delete(job)
     db.commit()
     return {"ok": True}
-
-
-@router.post("/clear_all")
-def clear_all_jobs(db: Session = Depends(get_session)):
-    """清空岗位库(保留档位与条件配置)。"""
-    from ..scheduler import scheduler
-
-    n = db.query(Job).count()
-    db.query(Job).delete()
-    db.commit()
-    return {"ok": True, "deleted": n, "hint": "运行中的任务不受影响,但已抓数据不可恢复"}
