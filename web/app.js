@@ -208,6 +208,18 @@ const app = createApp({
       detailTask.value = t;
       taskDetailVisible.value = true;
     }
+    // 详情抽屉福利标签:兼容顿号/逗号/分号多种分隔,并去掉空片段
+    const welfareTags = computed(() => {
+      const w = (currentJob.value || {}).welfare || "";
+      return w.split(/[,，;；、]+/).map((s) => s.trim()).filter(Boolean);
+    });
+    // 异常面板为悬浮二级卡片:点击面板与唤起按钮以外的空白处即收起
+    function onDocClick(ev) {
+      if (!eventsOpen.value) return;
+      const t = ev.target;
+      if (t.closest && (t.closest(".event-panel") || t.closest(".event-fab"))) return;
+      eventsOpen.value = false;
+    }
 
     // ---------- 数据加载 ----------
     async function loadPlatforms() {
@@ -632,15 +644,19 @@ const app = createApp({
       reloadJobs();
       await pollStatus();
       timer = setInterval(pollStatus, 3000);
+      document.addEventListener("click", onDocClick);
     });
-    onUnmounted(() => clearInterval(timer));
+    onUnmounted(() => {
+      clearInterval(timer);
+      document.removeEventListener("click", onDocClick);
+    });
 
     return {
       SearchIcon, RefreshIcon, LinkIcon, DeleteIcon, SettingIcon,
       platforms, gears, filters, tables, jobs, stats, recentTasks, events, eventsOpen,
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
-      taskDetailVisible, detailTask, showTaskDetail,
+      taskDetailVisible, detailTask, showTaskDetail, welfareTags,
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
