@@ -97,6 +97,13 @@ class BasePlatform(ABC):
     def describe(self) -> dict:
         return {"id": self.id, "name": self.name, "home_url": self.home_url}
 
+    def supported_cities(self) -> set[str]:
+        """该平台可直接检索的城市集合(城市代码表键,不含"全国")。
+
+        未收录的城市在调度器启动前拒绝(而非悄悄回退全国,误导用户)。
+        """
+        return set()
+
     async def rebuild_open_params(self, page: Page, jid2kw: dict[str, str], progress=None) -> dict[str, dict]:
         """旧数据修复:为岗位重建"打开详情所需的参数"(Boss securityId/lid 等)。
 

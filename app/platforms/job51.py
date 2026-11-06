@@ -50,6 +50,9 @@ class Job51Platform(BasePlatform):
     home_url = "https://www.51job.com"
     home_prefix = "https://we.51job.com"
 
+    def supported_cities(self) -> set[str]:
+        return set(JOB51["city_codes"]) - {"全国"}
+
     # ---------- 登录态 ----------
     async def is_logged_in(self, page: Page) -> bool:
         try:

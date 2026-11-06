@@ -125,8 +125,11 @@ def _db_update_existing(
 ) -> int:
     """重复岗位:只更新有变化的字段(活跃估算/薪资/行业等),不重复入库。
 
-    返回发生变化的字段数,用于进度提示;有变化时把 crawl_task_id 更新为
-    本次任务(外键语义:最后更新该岗位的抓取)。
+    返回值:命中时 >= 0(值为发生变化的字段数,可为 0 = 无字段变化);
+    未命中返回 -1。调用方据此区分"已存在"与"不存在",避免把无变化的
+    重复岗位误判为新岗位而重复 INSERT(唯一键冲突会让整个任务中断)。
+
+    有变化时把 crawl_task_id 更新为本次任务(外键语义:最后更新该岗位的抓取)。
     """
     with SessionLocal() as db:
         row = (
@@ -135,7 +138,7 @@ def _db_update_existing(
             .first()
         )
         if not row:
-            return 0
+            return -1
         changed = 0
         for f in _REFRESH_FIELDS:
             new = getattr(draft, f, None)
@@ -354,6 +357,7 @@ class Scheduler:
         gear_id: int | None = None,
         keyword: str | None = None,
         city: str | None = None,
+        cities: list[str] | None = None,
         salary: str | None = None,
         table_id: int | None = None,
         max_pages: int | None = None,
@@ -363,6 +367,7 @@ class Scheduler:
 
         条件来源优先级:filter_id(已存条件) > gear_id(直选档位) > keyword(临时词)。
         all_keywords=True 时跑档位的全部词条(对齐实例的多关键词批量采集)。
+        cities: 城市列表(多选,空=全国);city 为旧单值参数(兼容),cities 优先。
         salary: 薪资范围原文(如 "10-20" / "10," / ",20",单位K/月,单边可缺省)。
         table_id: 新岗位存入的目标数据表(空=默认表)。
         """
@@ -379,7 +384,19 @@ class Scheduler:
         elif gear_id:
             gear_name, gear_keywords = await asyncio.to_thread(_db_load_gear, gear_id)
 
-        city = city if city is not None else f_city
+        # 城市列表:显式 cities 优先;否则从已存条件 city 拆分(逗号分隔;兼容旧单值)
+        if cities is None:
+            cities = [c.strip() for c in (f_city or "").split(",") if c.strip()]
+        cities = list(dict.fromkeys(c.strip() for c in (cities or []) if c and c.strip()))
+        # 平台未收录的城市代码:启动前明确拒绝,而不是悄悄回退全国(误导用户)
+        supported = plat.supported_cities()
+        bad = [c for c in cities if c not in supported]
+        if bad:
+            raise ValueError(
+                f"{plat.name} 暂未收录城市代码: {','.join(bad)}"
+                + (f"。当前支持: {'、'.join(sorted(supported))}" if supported else "")
+            )
+
         # 关键词列表:显式 keyword 优先(单词条);否则用档位全部/首个词条
         if keyword:
             kw_list = [keyword]
@@ -399,7 +416,7 @@ class Scheduler:
 
         max_pages = max_pages or config.MAX_PAGES_PER_TASK
         snapshot = {
-            "city": city, "keyword": "、".join(kw_list), "gear": gear_name,
+            "city": ",".join(cities), "cities": cities, "keyword": "、".join(kw_list), "gear": gear_name,
             "keywords": kw_list, "extras": extras, "max_pages": max_pages,
             "salary": sal_raw, "table_id": table_id,
         }
@@ -604,14 +621,21 @@ class Scheduler:
                 return jid in existing_ids
 
             kw_list: list[str] = snap.get("keywords") or []
-            for ki, kw in enumerate(kw_list, start=1):
+            # 城市列表:多选城市逐一检索(空列表=全国);兼容旧快照的单 city 字段
+            cities = list(snap.get("cities") or [])
+            if not cities and snap.get("city"):
+                cities = [c.strip() for c in str(snap["city"]).split(",") if c.strip()]
+            combos = [(kw, c) for kw in kw_list for c in (cities or [""])]
+            total = len(combos)
+            for idx, (kw, cur_city) in enumerate(combos, start=1):
                 if stop.is_set():
                     status, message = "stopped", "用户手动停止"
                     break
-                progress(f"词条 {ki}/{len(kw_list)}: 「{kw}」开始")
+                loc = f"@{cur_city}" if cur_city else "@全国"
+                progress(f"任务组合 {idx}/{total}: 「{kw}」{loc} 开始")
                 async for draft in plat.iter_jobs(
                     page,
-                    city=snap["city"],
+                    city=cur_city,
                     keyword=kw,
                     extras=snap["extras"],
                     max_pages=snap["max_pages"],
@@ -631,13 +655,13 @@ class Scheduler:
                     seen_ids.add(draft.platform_job_id)
                     found += 1
                     counters.update(found=found)
-                    outcome = await self._process_one(plat, draft, snap, progress, task_id, bump)
+                    outcome = await self._process_one(plat, draft, snap, progress, task_id, bump, cur_city)
                     if outcome == "saved":
                         saved += 1
                     else:
                         skipped += 1
                     counters.update(saved=saved, skipped=skipped, skip_stats=skip_stats)
-                if ki < len(kw_list) and not stop.is_set():
+                if idx < total and not stop.is_set():
                     from ..utils import human_delay
 
                     await human_delay()
@@ -647,7 +671,8 @@ class Scheduler:
             brief = f"发现 {found},新入库 {saved},跳过 {skipped}"
             if status == "done":
                 detail = ",".join(f"{k} {v}" for k, v in skip_stats.items())
-                message = f"完成:{len(kw_list)} 个词条,{brief}" + (f"({detail})" if detail else "")
+                n_city = len(cities) or 1
+                message = f"完成:{len(kw_list)} 个词条×{n_city} 个城市,{brief}" + (f"({detail})" if detail else "")
             elif status == "stopped":
                 message = f"用户手动停止:{brief}"
         except LoginRequired as exc:
@@ -656,7 +681,7 @@ class Scheduler:
             status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
         except Exception as exc:  # noqa: BLE001
             logger.exception("抓取任务异常")
-            status, message = f"{type(exc).__name__}: {exc}"
+            status, message = "error", f"{type(exc).__name__}: {exc}"
             await asyncio.to_thread(
                 _db_add_events, platform,
                 [{"message": f"任务{task_id}异常: {message}", "url": plat.home_url}],
@@ -671,8 +696,13 @@ class Scheduler:
             self._stops.pop(platform, None)
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)
 
-    async def _process_one(self, plat, draft: JobDraft, snap: dict, progress, task_id: int, bump) -> str:
-        """查重 → 评估 → 入库。返回 'saved' 或 'skipped';bump 记录跳过原因。"""
+    async def _process_one(
+        self, plat, draft: JobDraft, snap: dict, progress, task_id: int, bump, city: str = ""
+    ) -> str:
+        """查重 → 评估 → 入库。返回 'saved' 或 'skipped';bump 记录跳过原因。
+
+        city: 本次检索的城市(多选循环中的当前城市),作为岗位城市的入库兜底。
+        """
         # 适配器解析层警告(字段缺失/平台文本可能变化)持久化到异常面板(带岗位链接)
         warns = draft.raw.pop("_warnings", None) or []
         if warns:
@@ -699,7 +729,7 @@ class Scheduler:
         exists = await asyncio.to_thread(
             _db_update_existing, plat.id, draft.platform_job_id, draft, task_id
         )
-        if exists:
+        if exists >= 0:
             # 已存在:仅更新有变化的字段,不重复入库(需求:比对是否已存在)
             if exists > 0:
                 progress(f"已存在「{draft.title}」: 同步更新{exists}个字段")
@@ -717,7 +747,7 @@ class Scheduler:
             return "skipped"
 
         await asyncio.to_thread(
-            _db_insert_job, plat.id, draft, result, snap.get("keyword", ""), snap.get("city", ""),
+            _db_insert_job, plat.id, draft, result, snap.get("keyword", ""), city,
             task_id, snap.get("table_id"),
         )
         note = f"(备注: {result.remark})" if result.remark else ""

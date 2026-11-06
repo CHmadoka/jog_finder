@@ -48,6 +48,42 @@ const KwEditor = {
     </div>`,
 };
 
+// 城市选择器:省→市两级级联选择(按行政级别分级),选中即加为标签(可多选)。
+// 与 KwEditor 同容器风格:标签展示已选 + 选择器追加;叶子 value 为城市短名,
+// 与平台 city_codes 键一致(数据源 web/cities.js,生成脚本 scripts/gen_cities.py)
+const CityPicker = {
+  props: {
+    modelValue: { type: Array, default: () => [] },
+    placeholder: { type: String, default: "选择省 → 市后添加" },
+  },
+  emits: ["update:modelValue"],
+  setup(props, { emit }) {
+    const options = window.CN_PROVINCE_CITIES || [];
+    const picked = Vue.ref([]);
+    function onChange(vals) {
+      const v = Array.isArray(vals) ? vals[vals.length - 1] : "";
+      if (v && !props.modelValue.includes(v)) {
+        emit("update:modelValue", [...props.modelValue, v]);
+      }
+      picked.value = [];   // 添加后即清空选择器,便于继续选下一个城市
+    }
+    function remove(i) {
+      emit("update:modelValue", props.modelValue.filter((_, idx) => idx !== i));
+    }
+    return { options, picked, onChange, remove };
+  },
+  template: `
+    <div class="kw-editor">
+      <div class="kw-tags" v-show="modelValue.length">
+        <el-tag v-for="(c, i) in modelValue" :key="c + i" size="small" effect="plain" closable
+                @close="remove(i)">{{ c }}</el-tag>
+      </div>
+      <el-cascader v-model="picked" :options="options" :props="{ expandTrigger: 'hover' }"
+                   size="small" :placeholder="placeholder" :show-all-levels="false" clearable
+                   @change="onChange"></el-cascader>
+    </div>`,
+};
+
 const app = createApp({
   setup() {
     // ---------- 状态 ----------
@@ -68,11 +104,11 @@ const app = createApp({
       mode: "quick",            // quick | saved
       filter_id: null,
       gear_id: null,
-      city: "",
+      cities: [],               // 多选城市(省市级联选择;空 = 全国)
       keyword: "",
       salary_min: "",           // 薪资范围下限(K/月,可缺省)
       salary_max: "",           // 薪资范围上限(K/月,可缺省)
-      max_pages: 3,
+      max_pages: 10,
       all_keywords: true,
     });
 
@@ -95,7 +131,7 @@ const app = createApp({
     const eventsOpen = ref(false);
     const gearForm = reactive({ id: null, name: "", keywords: [] });
     const filterForm = reactive({
-      id: null, platform: "boss", name: "", city: "", gear_id: null, keyword: "",
+      id: null, platform: "boss", name: "", cities: [], gear_id: null, keyword: "",
       salary_min: "", salary_max: "",
       industries_avoid: [], industries_prefer: [],
     });
@@ -186,6 +222,11 @@ const app = createApp({
       const numRe = /^\d+(\.\d+)?$/;
       if ((lo && !numRe.test(lo)) || (hi && !numRe.test(hi))) return "INVALID";
       return `${lo},${hi}`;
+    }
+    // 逗号分隔多城市串 → 顿号展示(空 = 全国);任务记录/条件均以此格式存储
+    function fmtCities(s) {
+      const arr = (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+      return arr.length ? arr.join("、") : "全国";
     }
     function activeTagType(label) {
       if (/今日|昨日|刚刚/.test(label)) return "success";
@@ -361,7 +402,7 @@ const app = createApp({
           : {
               ...base,
               gear_id: grab.gear_id || null,
-              city: grab.city.trim() || null,
+              cities: grab.cities,          // 多选城市(空 = 全国)
               keyword: grab.keyword.trim() || null,
               all_keywords: grab.all_keywords,
             };
@@ -425,8 +466,8 @@ const app = createApp({
     function resetFilterForm() {
       filterForm.id = null;
       filterForm.platform = grab.platform;
-      filterForm.name = `${platformOf(grab.platform)}-${grab.city.trim() || "全国"}`;
-      filterForm.city = grab.city.trim();
+      filterForm.name = `${platformOf(grab.platform)}-${grab.cities.length ? grab.cities.join("_") : "全国"}`;
+      filterForm.cities = [...grab.cities];
       filterForm.gear_id = grab.gear_id || null;
       filterForm.keyword = grab.keyword.trim();
       const [smin, smax] = (grab.salary_min.trim() || grab.salary_max.trim())
@@ -440,7 +481,8 @@ const app = createApp({
       filterForm.id = row.id;
       filterForm.platform = row.platform;   // 编辑时锁定原始平台,防止被当前界面平台覆盖
       filterForm.name = row.name;
-      filterForm.city = row.city || "";
+      // 城市串(逗号分隔,兼容旧单值)→ 标签数组
+      filterForm.cities = (row.city || "").split(",").map((s) => s.trim()).filter(Boolean);
       filterForm.gear_id = row.gear_id || null;
       filterForm.keyword = row.keyword || "";
       const [smin, smax] = (row.extras.salary || "").split(",");
@@ -464,7 +506,7 @@ const app = createApp({
       const body = {
         platform: filterForm.platform,
         name: filterForm.name.trim(),
-        city: filterForm.city.trim(),
+        city: filterForm.cities.join(","),   // 多选城市存逗号分隔串(兼容旧单值格式)
         gear_id: filterForm.gear_id,
         keyword: filterForm.keyword.trim(),
         extras: {
@@ -660,7 +702,7 @@ const app = createApp({
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
-      platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, taskTagType, taskText,
+      platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
       loadJobs,
@@ -674,6 +716,7 @@ const app = createApp({
 });
 app.use(ElementPlus, { locale: ElementPlusLocaleZhCn });
 app.component("KwEditor", KwEditor);
+app.component("CityPicker", CityPicker);
 for (const [name, comp] of Object.entries(ElementPlusIconsVue)) {
   app.component(name, comp);
 }

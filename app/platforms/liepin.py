@@ -50,6 +50,9 @@ class LiepinPlatform(BasePlatform):
     home_url = "https://www.liepin.com"
     home_prefix = "https://www.liepin.com"
 
+    def supported_cities(self) -> set[str]:
+        return set(LIEPIN["city_codes"]) - {"全国"}
+
     # ---------- 登录态 ----------
     async def is_logged_in(self, page: Page) -> bool:
         try:

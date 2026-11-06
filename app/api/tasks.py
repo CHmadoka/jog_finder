@@ -29,19 +29,22 @@ def list_platforms(db: Session = Depends(get_session)):
 async def start_task(body: dict, db: Session = Depends(get_session)):
     """启动抓取任务。
 
-    body: {platform, filter_id?, gear_id?, keyword?, city?, salary?, table_id?, max_pages?, all_keywords?}
-    条件优先级:filter_id > gear_id > keyword
+    body: {platform, filter_id?, gear_id?, keyword?, cities?, city?, salary?, table_id?, max_pages?, all_keywords?}
+    条件优先级:filter_id > gear_id > keyword;城市 cities(多选列表)优先于旧单值 city。
     """
     platform = body.get("platform")
     if platform not in PLATFORMS:
         raise HTTPException(400, f"platform 必须是 {PLATFORMS}")
+    cities = body.get("cities")
+    if cities is None and body.get("city"):
+        cities = [body["city"]]   # 兼容旧单值参数
     try:
         task_id = await scheduler.start(
             platform,
             filter_id=body.get("filter_id"),
             gear_id=body.get("gear_id"),
             keyword=body.get("keyword"),
-            city=body.get("city"),
+            cities=cities,
             salary=body.get("salary"),
             table_id=body.get("table_id"),
             max_pages=body.get("max_pages"),

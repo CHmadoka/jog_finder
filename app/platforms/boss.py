@@ -116,6 +116,9 @@ class BossPlatform(BasePlatform):
     home_prefix = "https://www.zhipin.com"
     detail_url_marker = "/job_detail/"
 
+    def supported_cities(self) -> set[str]:
+        return set(BOSS["city_codes"]) - {"全国"}
+
     # ---------- 接口辅助 ----------
     @staticmethod
     def _joblist_js(query: str, city: str, page_num: int, page_size: int = 30) -> str:

@@ -9,6 +9,7 @@
   <script src="https://registry.npmmirror.com/element-plus/2.7.3/files/dist/index.full.min.js"></script>
   <script src="https://registry.npmmirror.com/element-plus/2.7.3/files/dist/locale/zh-cn.min.js"></script>
   <script src="https://registry.npmmirror.com/@element-plus/icons-vue/2.3.1/files/dist/index.iife.min.js"></script>
+  <script src="/assets/cities.js"></script>
   <style>
     :root {
       --el-color-primary: #4c6ef5;
@@ -199,6 +200,8 @@
     .kw-editor:focus-within { border-color: var(--el-color-primary-light-5); }
     .kw-tags { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 2px; }
     .kw-editor .el-input__wrapper { box-shadow: none !important; background: transparent; padding-left: 1px; }
+    .kw-editor .el-cascader { width: 100%; }
+    .kw-editor .el-cascader .el-input__wrapper { box-shadow: none !important; background: transparent; padding-left: 1px; }
 
     .k-unit { color: #f59e0b; font-weight: 700; font-size: 13px; }
 
@@ -374,8 +377,8 @@
             </el-tooltip>
           </div>
 
-          <div class="field-label">城市</div>
-          <el-input v-model="grab.city" placeholder="如:武汉(留空 = 全国)" clearable></el-input>
+          <div class="field-label">城市(可多选,留空 = 全国)</div>
+          <city-picker v-model="grab.cities"></city-picker>
 
           <div class="field-label">
             限定词条(可选)
@@ -400,7 +403,7 @@
             当前平台暂无已存条件，点击右上角「管理条件」创建
           </div>
           <div class="cond-summary" v-if="selectedFilter">
-            <div><span class="cs-k">城市</span>{{ selectedFilter.city || '全国' }}</div>
+            <div><span class="cs-k">城市</span>{{ fmtCities(selectedFilter.city) }}</div>
             <div><span class="cs-k">设置</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联设置' }}</div>
             <div><span class="cs-k">词条</span>{{ selectedFilter.keyword || '(按设置全部词条抓取)' }}</div>
             <div><span class="cs-k">薪资</span>{{ fmtSalaryRange(selectedFilter.extras.salary) }}</div>
@@ -660,7 +663,7 @@
           </template>
           <template v-else>—</template>
         </el-descriptions-item>
-        <el-descriptions-item label="城市">{{ detailTask.city || '全国' }}</el-descriptions-item>
+        <el-descriptions-item label="城市">{{ fmtCities(detailTask.city) }}</el-descriptions-item>
         <el-descriptions-item label="薪资范围">{{ fmtSalaryRange(detailTask.salary_range) }}</el-descriptions-item>
         <el-descriptions-item label="发现">{{ detailTask.found }}</el-descriptions-item>
         <el-descriptions-item label="新入库">{{ detailTask.saved }}</el-descriptions-item>
@@ -757,7 +760,9 @@
         <span class="muted" style="margin-left:8px" v-if="filterForm.id">编辑时平台不可更改</span>
       </el-form-item>
       <el-form-item label="条件名"><el-input v-model="filterForm.name" style="width:280px"></el-input></el-form-item>
-      <el-form-item label="城市"><el-input v-model="filterForm.city" placeholder="如: 上海(留空 = 全国)" style="width:280px" clearable></el-input></el-form-item>
+      <el-form-item label="城市">
+        <city-picker v-model="filterForm.cities" placeholder="选择省 → 市后添加(可多选,留空 = 全国)"></city-picker>
+      </el-form-item>
       <el-form-item label="岗位设置">
         <el-select v-model="filterForm.gear_id" clearable filterable style="width:280px" placeholder="选择设置(可空)">
           <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id"></el-option>
