@@ -564,6 +564,10 @@ const app = createApp({
       qTimer = setTimeout(() => { query.page = 1; loadJobs(); }, 400);
     });
 
+    // 弹窗关闭即还原编辑/新建状态(未保存的编辑不残留到下次打开)
+    watch(gearVisible, (v) => { if (!v) resetGearForm(); });
+    watch(tableVisible, (v) => { if (!v) resetTableForm(); });
+
     watch(currentJob, (v) => { if (v) showDetail.value = true; });
 
     onMounted(async () => {

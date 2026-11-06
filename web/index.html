@@ -352,21 +352,21 @@
               </el-option>
             </el-select>
             <el-tooltip content="管理岗位设置" placement="top">
-              <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openGearDialog" />
+              <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openGearDialog"></el-button>
             </el-tooltip>
           </div>
 
           <div class="field-label">城市</div>
-          <el-input v-model="grab.city" placeholder="如:武汉(留空 = 全国)" clearable />
+          <el-input v-model="grab.city" placeholder="如:武汉(留空 = 全国)" clearable></el-input>
 
           <div class="field-label">
             限定词条(可选)
             <span class="link" @click="grab.keyword = ''" v-if="grab.keyword">清除</span>
           </div>
-          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词,留空跑设置全部词条" clearable />
+          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词,留空跑设置全部词条" clearable></el-input>
 
           <div class="field-label">每词条最多翻页数</div>
-          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" />
+          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
         </template>
 
         <!-- 已存条件 -->
@@ -376,7 +376,7 @@
             <span class="link" @click="openFilterDialog">管理条件</span>
           </div>
           <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="width:100%">
-            <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name" />
+            <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name"></el-option>
           </el-select>
           <div class="empty-tip" v-if="!filters.length">
             当前平台暂无已存条件，点击右上角「管理条件」创建
@@ -400,7 +400,7 @@
             </div>
           </div>
           <div class="field-label">每词条最多翻页数</div>
-          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" />
+          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
         </template>
 
         <!-- 两种模式共用:薪资范围(双输入,橙色K后缀,单边可缺省) -->
@@ -463,17 +463,17 @@
         <div class="table-combo with-tag">
           <div class="combo-select-wrap">
             <el-select v-model="query.table_id" style="width:128px" @change="onTableChange">
-              <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name" />
+              <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
             </el-select>
             <el-tag v-if="(query.table_id || 1) === 1" size="small" type="info" effect="plain"
                     class="combo-inner-tag">默认</el-tag>
           </div>
           <el-tooltip content="管理数据表(新建 / 重命名 / 清空 / 删除)" placement="top">
-            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTableDialog" />
+            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTableDialog"></el-button>
           </el-tooltip>
         </div>
         <el-select v-model="query.platform" placeholder="全部平台" clearable style="width:120px" @change="reloadJobs">
-          <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id" />
+          <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id"></el-option>
         </el-select>
         <el-input v-model="query.q" placeholder="搜索职位 / 公司" clearable style="width:220px" :prefix-icon="SearchIcon">
           <template #suffix></template>
@@ -484,7 +484,7 @@
           </el-button>
         </el-tooltip>
         <el-tooltip content="刷新列表与统计">
-          <el-button :icon="RefreshIcon" circle @click="reloadJobs" />
+          <el-button :icon="RefreshIcon" circle @click="reloadJobs"></el-button>
         </el-tooltip>
       </div>
 
@@ -540,11 +540,11 @@
           <el-table-column label="操作" width="96" align="center">
             <template #default="{ row }">
               <el-tooltip content="在已登录浏览器打开" placement="top">
-                <el-button :icon="LinkIcon" circle size="small" class="op-btn" @click.stop="openJob(row)" />
+                <el-button :icon="LinkIcon" circle size="small" class="op-btn" @click.stop="openJob(row)"></el-button>
               </el-tooltip>
               <el-tooltip content="删除" placement="top">
                 <el-button :icon="DeleteIcon" circle size="small" class="op-btn op-danger"
-                           @click.stop="delJob(row)" />
+                           @click.stop="delJob(row)"></el-button>
               </el-tooltip>
             </template>
           </el-table-column>
@@ -553,7 +553,7 @@
           <el-pagination layout="total, sizes, prev, pager, next" :total="jobs.total"
                          :page-sizes="[20, 50, 100]" v-model:current-page="query.page"
                          v-model:page-size="query.page_size" @current-change="loadJobs"
-                         @size-change="reloadJobs" background size="small" />
+                         @size-change="reloadJobs" background size="small"></el-pagination>
         </div>
       </div>
     </main>
@@ -664,9 +664,9 @@
   <el-dialog v-model="gearVisible" title="岗位设置管理" width="660px">
     <div class="dlg-formline">
       <el-input v-model="gearForm.name" placeholder="设置名,如: Java后端" style="width:170px; flex-shrink:0"
-                @keyup.enter="saveGear" />
+                @keyup.enter="saveGear"></el-input>
       <el-select v-model="gearForm.keywords" multiple filterable allow-create default-first-option
-                 placeholder="岗位词条,输入后回车,如: Java / 服务端" />
+                 placeholder="岗位词条,输入后回车,如: Java / 服务端"></el-select>
       <el-button type="primary" style="flex-shrink:0" :disabled="!!gearForm.id" @click="saveGear">
         <el-icon><Plus /></el-icon>添加
       </el-button>
@@ -675,15 +675,11 @@
       <div class="dlg-row" v-for="g in gears" :key="g.id">
         <template v-if="gearForm.id === g.id">
           <el-input v-model="gearForm.name" size="small" style="width:160px; flex-shrink:0"
-                    @keyup.enter="saveGear" />
+                    @keyup.enter="saveGear"></el-input>
           <el-select v-model="gearForm.keywords" size="small" multiple filterable allow-create
-                     default-first-option placeholder="词条,回车添加" style="flex:1; min-width:0" />
-          <button class="act-btn primary" style="flex-shrink:0" @click="saveGear">
-            <el-icon><Check /></el-icon>保存
-          </button>
-          <button class="act-btn" style="flex-shrink:0" @click="resetGearForm">
-            <el-icon><Close /></el-icon>取消
-          </button>
+                     default-first-option placeholder="词条,回车添加" style="flex:1; min-width:0"></el-select>
+          <el-button type="primary" size="small" style="flex-shrink:0" @click="saveGear">保存</el-button>
+          <el-button size="small" style="flex-shrink:0" @click="resetGearForm">取消</el-button>
         </template>
         <template v-else>
           <div style="flex:1; min-width:0">
@@ -709,14 +705,14 @@
         <el-table-column label="平台" width="90">
           <template #default="{ row }">{{ platformOf(row.platform) }}</template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip></el-table-column>
         <el-table-column label="城市" width="80">
           <template #default="{ row }">{{ row.city || '全国' }}</template>
         </el-table-column>
         <el-table-column label="设置" width="110">
           <template #default="{ row }">{{ row.gear_id ? gearName(row.gear_id) : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="keyword" label="词条" min-width="90" show-overflow-tooltip />
+        <el-table-column prop="keyword" label="词条" min-width="90" show-overflow-tooltip></el-table-column>
         <el-table-column label="薪资" width="80">
           <template #default="{ row }">{{ fmtSalaryRange(row.extras.salary) }}</template>
         </el-table-column>
@@ -743,18 +739,18 @@
     <el-form label-width="90px">
       <el-form-item label="平台">
         <el-select v-model="filterForm.platform" :disabled="!!filterForm.id" style="width:180px">
-          <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id" />
+          <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id"></el-option>
         </el-select>
         <span class="muted" style="margin-left:8px" v-if="filterForm.id">编辑时平台不可更改</span>
       </el-form-item>
-      <el-form-item label="条件名"><el-input v-model="filterForm.name" style="width:280px" /></el-form-item>
-      <el-form-item label="城市"><el-input v-model="filterForm.city" placeholder="如: 上海(留空 = 全国)" style="width:280px" clearable /></el-form-item>
+      <el-form-item label="条件名"><el-input v-model="filterForm.name" style="width:280px"></el-input></el-form-item>
+      <el-form-item label="城市"><el-input v-model="filterForm.city" placeholder="如: 上海(留空 = 全国)" style="width:280px" clearable></el-input></el-form-item>
       <el-form-item label="岗位设置">
         <el-select v-model="filterForm.gear_id" clearable filterable style="width:280px" placeholder="选择设置(可空)">
-          <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id" />
+          <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id"></el-option>
         </el-select>
       </el-form-item>
-      <el-form-item label="限定词条"><el-input v-model="filterForm.keyword" placeholder="留空则按设置全部词条抓取" style="width:280px" clearable /></el-form-item>
+      <el-form-item label="限定词条"><el-input v-model="filterForm.keyword" placeholder="留空则按设置全部词条抓取" style="width:280px" clearable></el-input></el-form-item>
       <el-form-item label="薪资范围">
         <div style="display:flex; gap:8px; align-items:center; width:280px;">
           <el-input v-model="filterForm.salary_min" placeholder="最低" clearable>
@@ -768,11 +764,11 @@
       </el-form-item>
       <el-form-item label="避开行业">
         <el-select v-model="filterForm.industries_avoid" multiple filterable allow-create default-first-option
-                   placeholder="输入行业关键词后回车,如: 电商 / 金融 / 游戏" style="width:100%" />
+                   placeholder="输入行业关键词后回车,如: 电商 / 金融 / 游戏" style="width:100%"></el-select>
       </el-form-item>
       <el-form-item label="优先行业">
         <el-select v-model="filterForm.industries_prefer" multiple filterable allow-create default-first-option
-                   placeholder="输入行业关键词后回车,如: 制造业 / 医疗" style="width:100%" />
+                   placeholder="输入行业关键词后回车,如: 制造业 / 医疗" style="width:100%"></el-select>
       </el-form-item>
       <el-form-item>
         <el-button type="primary" @click="saveFilter">{{ filterForm.id ? '更新条件' : '保存条件' }}</el-button>
@@ -791,11 +787,11 @@
       <div class="dlg-row" v-for="t in tables" :key="t.id">
         <template v-if="tableForm.id === t.id">
           <el-input v-model="tableForm.name" size="small" placeholder="新表名" style="width:190px"
-                    @keyup.enter="saveTable" />
+                    @keyup.enter="saveTable"></el-input>
           <span class="dlg-sub">{{ t.slug }}</span>
           <span style="flex:1"></span>
-          <button class="act-btn primary" @click="saveTable"><el-icon><Check /></el-icon>保存</button>
-          <button class="act-btn" @click="resetTableForm"><el-icon><Close /></el-icon>取消</button>
+          <el-button type="primary" size="small" @click="saveTable">保存</el-button>
+          <el-button size="small" @click="resetTableForm">取消</el-button>
         </template>
         <template v-else>
           <span class="dlg-name">
