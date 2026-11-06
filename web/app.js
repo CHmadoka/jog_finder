@@ -602,6 +602,7 @@ const app = createApp({
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, taskTagType, taskText,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
+      loadJobs,
       onSortChange, toggleSortOrder, onTableChange,
       openGearDialog, resetGearForm, editGear, saveGear, delGear,
       openFilterDialog, resetFilterForm, editFilter, editSelectedFilter, saveFilter, delFilter,

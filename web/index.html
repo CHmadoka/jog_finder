@@ -688,7 +688,11 @@
         <template v-else>
           <div style="flex:1; min-width:0">
             <div class="dlg-name">{{ g.name }}</div>
-            <div class="dlg-sub">{{ (g.keywords || []).join(' / ') || '无词条' }}</div>
+            <div style="margin-top:3px">
+              <el-tag v-for="k in g.keywords" :key="k" size="small" effect="plain"
+                      style="margin:2px 6px 2px 0">{{ k }}</el-tag>
+              <span v-if="!(g.keywords || []).length" class="dlg-sub">无词条</span>
+            </div>
           </div>
           <button class="act-btn" @click="editGear(g)"><el-icon><EditPen /></el-icon>编辑</button>
           <button class="act-btn danger" @click="delGear(g.id)"><el-icon><Delete /></el-icon>删除</button>
