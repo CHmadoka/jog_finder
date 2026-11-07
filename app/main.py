@@ -44,6 +44,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="job_finder", version="0.1.0", lifespan=lifespan)
 app.include_router(api_router)
 
+
+@app.middleware("http")
+async def no_cache_for_local_ui(request, call_next):
+    """本地界面资源强制协商缓存(ETag/304)。
+
+    StaticFiles/FileResponse 默认无 Cache-Control,浏览器按启发式规则强缓存
+    app.js 等文件——改版后普通刷新仍跑旧脚本,曾导致"切表不刷新/新修复不生效"
+    这类"改了没反应"的假象。no-cache = 可缓存但每次必须协商:文件没变 304
+    (不重传),变了立即拿到新文件。本地单用户服务,协商开销可忽略。
+    """
+    resp = await call_next(request)
+    p = request.url.path
+    if p == "/" or p.startswith("/assets"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 if config.WEB_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(config.WEB_DIR)), name="assets")
 
