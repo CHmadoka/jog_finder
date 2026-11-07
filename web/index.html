@@ -69,7 +69,9 @@
       overflow-y: scroll; scrollbar-gutter: stable;
       display: flex; flex-direction: column; gap: 8px;
     }
-    .main { flex: 1; min-width: 0; padding: 14px 14px 14px 0; display: flex; flex-direction: column; }
+    /* 右栏边距与左栏一致(上/右/下 10/12,左由 side 的右 padding 提供):
+       顶栏下方两侧首行内容对齐,最近任务卡片与右栏底部同步 */
+    .main { flex: 1; min-width: 0; padding: 10px 12px 10px 0; display: flex; flex-direction: column; }
 
     .card {
       background: var(--card); border: 1px solid var(--border);
@@ -144,7 +146,12 @@
     .cond-summary .cs-k { color: var(--text3); display: inline-block; width: 44px; }
     .cond-summary .el-tag { margin-right: 4px; }
 
-    .start-hint { font-size: 12px; color: #e6a23c; margin-top: 8px; text-align: center; }
+    /* 抓取按钮外层(tooltip 触发载体 + 上边距):禁用按钮本身不冒泡鼠标事件 */
+    .grab-btn-wrap { display: block; width: 100%; margin-top: 10px; }
+    .grab-btn-wrap .el-button { width: 100%; margin-top: 0; }
+    /* 抓取按钮外层(tooltip 触发载体 + 上边距):禁用按钮本身不冒泡鼠标事件 */
+    .grab-btn-wrap { display: block; width: 100%; margin-top: 10px; }
+    .grab-btn-wrap .el-button { width: 100%; margin-top: 0; }
     /* ---------- 工具栏组合框(数据表下拉 + 设置) ---------- */
     .table-combo {
       display: inline-flex; align-items: center;
@@ -608,13 +615,18 @@
           </el-input>
         </div>
 
-        <el-button :type="running ? 'warning' : 'primary'" size="large" style="width:100%; margin-top:10px;"
-                   :disabled="!running && !canStart" :loading="starting"
-                   @click="running ? stopTask() : startTask()">
-          {{ running ? '停止抓取' : '开始抓取' }}
-        </el-button>
-        <div class="start-hint" v-if="!running && !canStart">{{ startHint }}</div>
-        <div class="start-hint" v-else style="color:var(--text3)">结果存入数据表「{{ currentTableName }}」</div>
+        <!-- 提示并入按钮:禁用时按钮文字即原因(黄字提示行删除,空间让给间隔);
+             存入表信息进 tooltip(span 包裹使禁用态按钮也能触发) -->
+        <el-tooltip :disabled="running" placement="top"
+                    :content="'结果存入数据表「' + currentTableName + '」' + (!canStart ? ' · ' + startHint : '')">
+          <span class="grab-btn-wrap">
+            <el-button :type="running ? 'warning' : 'primary'" size="large"
+                       :disabled="!running && !canStart" :loading="starting"
+                       @click="running ? stopTask() : startTask()">
+              {{ running ? '停止抓取' : (canStart ? '开始抓取' : startHint) }}
+            </el-button>
+          </span>
+        </el-tooltip>
       </div>
 
       <!-- 运行状态 -->
