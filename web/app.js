@@ -318,7 +318,11 @@ const app = createApp({
         let ended = false;
         for (const [pid, v] of Object.entries(st)) {
           const was = statuses[pid + "_was"];
-          if (!v.running && was) ended = true;
+          if (!v.running && was) {
+            ended = true;
+            // 任务由运行转为结束:异常中断时弹窗告知原因(风控/访问受限等)
+            if (v.last && v.last.status === "error") notifyInterrupted(pid, v.last);
+          }
           statuses[pid] = v;
           statuses[pid + "_was"] = v.running;
         }
@@ -331,6 +335,20 @@ const app = createApp({
       } catch (e) {}
     }
     let pollTick = 0;
+
+    // 任务异常中断弹窗:每平台只对"新出现的错误结果"提示一次
+    // (以 任务ID+消息 为指纹;用户手动停止/正常完成不弹)
+    const errorNotified = {};
+    function notifyInterrupted(pid, last) {
+      const sig = `${last.task_id}|${last.message || ""}`;
+      if (errorNotified[pid] === sig) return;
+      errorNotified[pid] = sig;
+      ElMessageBox.alert(
+        last.message || "任务异常中断,详情见左下角异常面板。",
+        `${platformOf(pid)} 抓取已中断`,
+        { confirmButtonText: "知道了", type: "error" }
+      );
+    }
 
     function reloadJobs() {
       query.page = 1;
@@ -414,8 +432,16 @@ const app = createApp({
       }
     }
     async function stopTask() {
-      await api(`/tasks/${grab.platform}/stop`, { method: "POST", body: {} });
-      ElMessage.info("已发送停止指令");
+      // 按后端真实返回反馈:任务不存在(ok=false)时如实提示,
+      // 避免"已发送停止指令"的假象(界面状态未及时刷新时按钮仍显示停止)
+      try {
+        const r = await api(`/tasks/${grab.platform}/stop`, { method: "POST", body: {} });
+        if (r && r.ok) {
+          ElMessage.info("停止指令已发送,当前岗位处理完立即中断");
+        } else {
+          ElMessage.warning((r && r.msg) || "当前没有运行中的抓取任务");
+        }
+      } catch (e) {}
     }
 
     // ---------- 岗位设置管理 ----------

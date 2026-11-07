@@ -32,6 +32,16 @@ logger = logging.getLogger(__name__)
 # 不能作为验证页依据;正文特征保留全词表但要求正文足够短(真验证页仅标题+滑块)
 _VERIFY_TITLE_RE = re.compile(r"安全验证|安全挑战")
 _VERIFY_TEXT_RE = re.compile(r"安全验证|安全挑战|拖动滑块|验证码")
+# 访问受限/限流页:高频访问后 Boss 把详情与列表接口一并重定向到
+# /web/passport/zp/403.html?code=32(页面文案"访问受限")。与"安全验证"不同:
+# 滑块解决不了限流,必须立即停止全部导航,否则每条岗位都会撞一次受限页
+# (实测:被限流后每 ~5 秒刷新一次受限页,持续加重风控)。
+_RESTRICTED_URL_RE = re.compile(r"/web/passport/zp/403\.html|403\.html\?code=")
+_RESTRICTED_TEXT_RE = re.compile(r"访问受限|访问过于频繁|请求过于频繁|操作过于频繁")
+_RESTRICTED_MSG = (
+    "Boss 访问受限(403/code=32):抓取频率过高被平台限流,任务已立即中止。"
+    "请等待一段时间(建议 30 分钟以上)后,在浏览器中确认可正常打开职位页再重新开始任务"
+)
 # 详情页结构特征:存在这些区块即说明岗位内容正常渲染,绝非验证页
 _DETAIL_DOM_RE = ".job-sec-text, .job-banner, .job-scribe, .detail-content"
 # HR 活跃文案(实测详情页名片区)
@@ -252,6 +262,30 @@ class BossPlatform(BasePlatform):
             return False
 
     # ---------- 风控 ----------
+    @staticmethod
+    def _is_restricted_url(url: str) -> bool:
+        return bool(_RESTRICTED_URL_RE.search(url or ""))
+
+    async def _raise_if_restricted(self, page: Page) -> None:
+        """命中"访问受限"页立即抛 AntiBot(调用方中止整个任务,不再发任何请求)。
+
+        判定依据(依次):URL 落在 403 限流页 / 标题含受限文案 / 正文前段含受限
+        文案(正文仅取前 300 字,避免岗位描述里偶发的同词误伤)。
+        """
+        if self._is_restricted_url(page.url or ""):
+            raise AntiBot(_RESTRICTED_MSG)
+        try:
+            title = (await page.title()) or ""
+            if _RESTRICTED_TEXT_RE.search(title):
+                raise AntiBot(_RESTRICTED_MSG)
+            text = (await page.evaluate("() => (document.body?.innerText||'').slice(0, 300)")) or ""
+            if _RESTRICTED_TEXT_RE.search(text):
+                raise AntiBot(_RESTRICTED_MSG)
+        except AntiBot:
+            raise
+        except Exception:  # noqa: BLE001  (页面导航瞬间 evaluate 可能抛错,忽略)
+            pass
+
     async def _is_verify_page(self, page: Page) -> bool:
         try:
             u = page.url or ""
@@ -340,7 +374,7 @@ class BossPlatform(BasePlatform):
         ), warns
 
     # ---------- 详情 ----------
-    async def _parse_detail(self, page: Page, draft: JobDraft) -> None:
+    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
         # 详情 URL 带 securityId/lid,防止 Boss 重定向到其他职位
         u = draft.url
         params = []
@@ -353,24 +387,37 @@ class BossPlatform(BasePlatform):
 
         # 详情页节奏:约 1s/个(可配置),轻微抖动
         await asyncio.sleep(random.uniform(0.8, max(0.8, config.DETAIL_DELAY)))
+        # 用户已请求停止:不再发起任何导航(停止指令即时生效)
+        if should_stop is not None and should_stop():
+            return
         try:
             await page.goto(u, wait_until="domcontentloaded", timeout=25000)
         except Exception:  # noqa: BLE001  (超时/导航中断均由后置 URL 轮询兜底)
             pass
+        # 访问受限第一时间判定:立即中止整个任务。绝不能当"岗位已下线"继续
+        # 下一条——那会对受限页连续导航几十次(实测被限流后每 5 秒撞一次)
+        await self._raise_if_restricted(page)
         # 轮询等待落地页稳定(跳转链较慢,最多 ~8s):URL 需包含 jobId
         landed = False
         for _ in range(8):
+            if should_stop is not None and should_stop():
+                return
             if draft.platform_job_id in page.url:
                 landed = True
                 break
+            if self._is_restricted_url(page.url or ""):
+                raise AntiBot(_RESTRICTED_MSG)
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=1500)
             except Exception:  # noqa: BLE001
                 pass
             await asyncio.sleep(0.5)
-        if not landed and await self._is_verify_page(page):
-            await self._wait_manual_verify(page, progress=None)
-            landed = draft.platform_job_id in page.url
+        if not landed:
+            # 正文型受限页(URL 未变)兜底判定,再走原验证页判定
+            await self._raise_if_restricted(page)
+            if await self._is_verify_page(page):
+                await self._wait_manual_verify(page, progress=None)
+                landed = draft.platform_job_id in page.url
         if not landed:
             # 不做二次硬闯:单次导航即定论,避免同一页面反复刷新加重风控
             logger.warning("Boss 详情落地页异常(视为已下线,跳过): %s -> %s", draft.title, page.url[:120])
@@ -380,6 +427,8 @@ class BossPlatform(BasePlatform):
         # 部分岗位 SSR 不带 HR 信息,等满上限即放弃)。0.4s 间隔抢在平台反调试
         # 可能的清理动作之前拿到完整数据。
         for _ in range(12):
+            if should_stop is not None and should_stop():
+                return
             try:
                 has = await page.evaluate(
                     "() => { const t = (document.body?.innerText || '');"
@@ -396,6 +445,7 @@ class BossPlatform(BasePlatform):
             logger.warning("Boss 详情页被清空(反自动化拦截): %s", draft.title)
             draft.raw["blanked"] = True
             return
+        await self._raise_if_restricted(page)
         if await self._is_verify_page(page):
             await self._wait_manual_verify(page, progress=None)
         try:
@@ -490,6 +540,7 @@ class BossPlatform(BasePlatform):
         progress=None,
         skip_check=None,
         warn=None,
+        should_stop=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
         # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
@@ -516,6 +567,8 @@ class BossPlatform(BasePlatform):
             seen: set[str] = set()
             skipped_known = 0
             for page_num in range(1, max(1, max_pages) + 1):
+                if should_stop is not None and should_stop():
+                    return
                 if page_num > 1:
                     await human_delay()
                 if progress:
@@ -567,9 +620,11 @@ class BossPlatform(BasePlatform):
                             progress(f"已跳过 {skipped_known} 个已入库岗位(不重复打开详情)")
                         yield draft
                         continue
+                    if should_stop is not None and should_stop():
+                        return
                     if dp is None:
                         dp = await page.context.new_page()
-                    await self._parse_detail(dp, draft)
+                    await self._parse_detail(dp, draft, should_stop=should_stop)
                     yield draft
                 if sal_filtered and progress:
                     progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")

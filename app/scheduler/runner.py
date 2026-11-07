@@ -16,7 +16,7 @@ from ..config import config
 from ..filter import evaluate_job
 from ..models import AppEvent, CrawlTask, Gear, Job, JobTable, SearchFilter, SessionLocal
 from ..models import now_local
-from ..platforms import get_platform
+from ..platforms import all_platforms, get_platform
 from ..platforms.base import AntiBot, JobDraft, LoginRequired, WarnCallback
 
 logger = logging.getLogger(__name__)
@@ -321,6 +321,9 @@ class Scheduler:
         self._stops: dict[str, asyncio.Event] = {}
         self._progress: dict[str, str] = {}  # platform -> 最近一条进度文本
         self._counters: dict[str, dict] = {}  # platform -> 实时计数
+        # platform -> 最近一次结束的任务结果 {task_id, status, message}。
+        # 供 /tasks/status 返回,前端据此在任务意外中断(风控/异常)时弹窗提示。
+        self._last_result: dict[str, dict] = {}
 
     # ---------- 状态 ----------
     def is_running(self, platform: str) -> bool:
@@ -328,13 +331,29 @@ class Scheduler:
         return bool(task and not task.done())
 
     def status(self) -> dict[str, dict]:
+        """各平台实时运行状态(内存进度)。
+
+        必须覆盖全部已知平台,而不是只返回运行中的平台:任务结束时会从
+        _tasks 移除条目,若响应缺失该平台,前端缓存的 running=true 永远
+        不会刷新——表现为"任务早已停止,界面仍显示正在抓取,停止按钮
+        点了没反应"。结束平台返回最终进度与最近一次任务结果(last)。
+        """
         out: dict[str, dict] = {}
-        for pid, task in self._tasks.items():
-            out[pid] = {
-                "running": not task.done(),
-                "progress": self._progress.get(pid, ""),
-                "counters": self._counters.get(pid, {}),
+        for p in all_platforms():
+            entry = {
+                "running": False,
+                "progress": self._progress.get(p.id, ""),
+                "counters": self._counters.get(p.id, {}),
             }
+            last = self._last_result.get(p.id)
+            if last:
+                entry["last"] = last
+            out[p.id] = entry
+        for pid, task in self._tasks.items():
+            out.setdefault(pid, {"running": False, "progress": "", "counters": {}})
+            out[pid]["running"] = not task.done()
+            out[pid]["progress"] = self._progress.get(pid, "")
+            out[pid]["counters"] = self._counters.get(pid, {})
         return out
 
     def request_stop(self, platform: str) -> bool:
@@ -499,7 +518,7 @@ class Scheduler:
                     },
                 )
                 try:
-                    await plat._parse_detail(dp, draft)
+                    await plat._parse_detail(dp, draft, should_stop=stop.is_set)
                 except AntiBot as exc:
                     status, message = "error", f"触发风控: {exc}"
                     break
@@ -564,6 +583,7 @@ class Scheduler:
                     except Exception:  # noqa: BLE001
                         pass
             self._progress[platform] = f"[补全] {message or status}"
+            self._last_result[platform] = {"task_id": None, "status": status, "message": message}
             self._tasks.pop(platform, None)
             self._stops.pop(platform, None)
             logger.info("补全任务结束: %s - %s", status, message)
@@ -639,6 +659,7 @@ class Scheduler:
                     progress=progress,
                     skip_check=skip_known,
                     warn=warn_cb,
+                    should_stop=stop.is_set,
                 ):
                     if stop.is_set():
                         status, message = "stopped", "用户手动停止"
@@ -673,8 +694,19 @@ class Scheduler:
                 message = f"用户手动停止:{brief}"
         except LoginRequired as exc:
             status, message = "error", str(exc)
+            await asyncio.to_thread(
+                _db_add_events, platform,
+                [{"message": f"任务{task_id}中断: {message}", "url": plat.home_url}],
+                level="error",
+            )
         except AntiBot as exc:
             status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
+            # 风控中断同样落异常面板:任务结束即弹窗提示,面板提供可追溯记录
+            await asyncio.to_thread(
+                _db_add_events, platform,
+                [{"message": f"任务{task_id}风控中断: {message}", "url": plat.home_url}],
+                level="error",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("抓取任务异常")
             status, message = "error", f"{type(exc).__name__}: {exc}"
@@ -688,6 +720,9 @@ class Scheduler:
                 _db_finish_task, task_id, status, message, dict(counters)
             )
             self._progress[platform] = f"[任务{task_id}] {message or status}"
+            self._last_result[platform] = {
+                "task_id": task_id, "status": status, "message": message,
+            }
             self._tasks.pop(platform, None)
             self._stops.pop(platform, None)
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)

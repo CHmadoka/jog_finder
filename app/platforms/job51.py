@@ -265,6 +265,7 @@ class Job51Platform(BasePlatform):
         progress=None,
         skip_check=None,
         warn=None,
+        should_stop=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
         # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
@@ -273,6 +274,8 @@ class Job51Platform(BasePlatform):
         try:
             seen: set[str] = set()
             for page_num in range(1, max(1, max_pages) + 1):
+                if should_stop is not None and should_stop():
+                    return
                 url = self._search_url(city, keyword, page_num, extras or {})
                 if progress:
                     progress(f"打开第 {page_num} 页: {keyword}@{city or '全国'}")
@@ -305,6 +308,8 @@ class Job51Platform(BasePlatform):
                     if skip_check and await skip_check(draft.platform_job_id):
                         yield draft
                         continue
+                    if should_stop is not None and should_stop():
+                        return
                     if draft.url:
                         if dp is None:
                             dp = await page.context.new_page()
