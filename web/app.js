@@ -413,7 +413,9 @@ const app = createApp({
       loadEvents();
     }
     async function loadTasks() {
-      recentTasks.value = await api(`/tasks?platform=${grab.platform}&limit=5`);
+      // 最近任务 = 全部平台混排(带平台徽标):任务记录不应被左栏当前平台隐藏,
+      // 否则"刚跑完的任务在界面上找不到"——用户在 boss 视图下看不到 job51/liepin 的记录
+      recentTasks.value = await api(`/tasks?limit=5`);
     }
     async function loadTaskOptions() {
       // 右栏任务下拉候选:跟随浏览区平台筛选(空=全部平台),最近 30 条
@@ -494,7 +496,7 @@ const app = createApp({
       grab.platform = pid;
       grab.filter_id = null;   // 条件按平台隔离
       await loadFilters();
-      loadTasks();
+      // 最近任务已全局化(全平台混排),平台切换不再影响任务列表
     }
     function switchMode(m) { grab.mode = m; }
 
@@ -779,8 +781,11 @@ const app = createApp({
       loadTables();
     }
     // 数据表切换:刷新列表(本地记忆由统一 watch 落盘)
+    // 任务过滤视图下 table_id 不生效(API 按 task_id 过滤并忽略工作表),
+    // 因此切表必须先退出任务过滤,否则表现为"切换数据表内容不变"
     function onTableChange() {
       query.page = 1;
+      if (query.task_id) query.task_id = null;
       reloadJobs();
     }
     // ---------- 界面状态本地记忆(下次打开自动恢复) ----------

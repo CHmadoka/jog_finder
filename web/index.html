@@ -254,6 +254,9 @@
     }
     .task-row:hover { background: #f7f8fc; }
     .task-row:last-child { border-bottom: none; }
+    /* 任务行的小号平台徽标:16px(30px 的 .plogo 是平台按钮专用尺寸,绑定
+       gen_logos.py 的 CSS_SIZE,不可改动;此处仅 CSS 缩放显示,srcset 仍生效) */
+    .task-row .plogo-sm { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
     .task-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
     .task-time { color: var(--text3); flex-shrink: 0; }
     .empty-tip { font-size: 12px; color: var(--text3); text-align: center; padding: 12px 0; }
@@ -609,10 +612,15 @@
         <div class="empty-tip" v-else>暂无进行中的任务，配置好条件后点「开始抓取」</div>
       </div>
 
-      <!-- 最近任务 -->
+      <!-- 最近任务:全平台混排(行首平台徽标标注归属),不被左栏当前平台过滤 -->
       <div class="card" style="flex:1">
-        <div class="card-title">最近任务<span class="aux">点击查看详情</span></div>
+        <div class="card-title">最近任务<span class="aux">全平台 · 点击查看详情</span></div>
         <div class="task-row" v-for="t in recentTasks" :key="t.id" @click="showTaskDetail(t)">
+          <span class="plogo plogo-sm" :style="platformLogo(t.platform).img ? {} : { background: platformLogo(t.platform).color }">
+            <img v-if="platformLogo(t.platform).img" :src="platformLogo(t.platform).img"
+                 :srcset="platformLogo(t.platform).srcset" alt="" @error="onLogoError(t.platform)">
+            <template v-else>{{ platformLogo(t.platform).text }}</template>
+          </span>
           <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status) }}</el-tag>
           <span class="task-msg" :title="t.message">{{ t.message || '—' }}</span>
           <span class="task-time">{{ t.status === 'done' || t.status === 'error' || t.status === 'stopped' ? fmtDate(t.finished_at || t.started_at) : '进行中' }}</span>
