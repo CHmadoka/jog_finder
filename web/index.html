@@ -63,7 +63,10 @@
     /* ---------- 布局 ---------- */
     .layout { display: flex; height: calc(100vh - 56px); }
     .side {
-      width: 396px; flex-shrink: 0; padding: 14px; overflow-y: auto;
+      width: 396px; flex-shrink: 0; padding: 14px;
+      /* 滚动条常驻:内容高度随平台/任务状态变化(如「最近任务」卡片空/非空差 8px),
+         若用 auto,高度恰在临界点时滚动条会忽隐忽现,内容区宽度跳 15px,卡片看起来"变宽" */
+      overflow-y: scroll; scrollbar-gutter: stable;
       display: flex; flex-direction: column; gap: 12px;
     }
     .main { flex: 1; min-width: 0; padding: 14px 14px 14px 0; display: flex; flex-direction: column; }
