@@ -98,7 +98,10 @@
       background: var(--card); border-radius: 10px; padding: 5px 14px;
       box-shadow: 0 1px 4px rgba(16, 24, 40, .10);
     }
-    .ts-item { position: relative; display: flex; align-items: center; gap: 7px; max-width: 470px; }
+    /* 文字元素按基线对齐:平台名(13px)与空闲/进度(12px)、计数徽章(11px)共用
+       一条基线,不再出现"平台文字偏低";圆点无文本基线,单独垂直居中 */
+    .ts-item { position: relative; display: flex; align-items: baseline; gap: 7px; max-width: 470px; }
+    .ts-item .dot { align-self: center; }
     .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
     .ts-idle { font-size: 12px; color: var(--text3); }
     .ts-progress {
@@ -297,13 +300,13 @@
     .combo-line.is-done .c-mark { color: var(--el-color-success); }
 
     /* ---------- 任务历史 ---------- */
-    /* 贴顶:去除贴底 auto 外边距,紧随「发起抓取」之后(.side flex gap 8px),
-       左栏卡片整体从顶部堆叠,底部留白 */
-    .task-card { display: flex; flex-direction: column; flex: none; }
-    /* 行高锁定 36px(含 1px 分隔线,内容垂直居中):5 行 = 180px 数学恒等,
-       不依赖 el-tag 的实际渲染高度 */
+    /* 贴顶+贴底:顶部紧随「发起抓取」(.side flex gap 8px),flex:1 撑满剩余
+       空间使卡片底边贴住左栏底部;行区高度随空间伸缩(不足时保持 5 行 180px) */
+    .task-card { display: flex; flex-direction: column; flex: 1; }
+    /* 行高锁定 36px(含 1px 分隔线,内容垂直居中):数学恒等,不依赖 el-tag 的实际渲染高度;
+       行区高度弹性:随左栏剩余空间增高(显示更多行),低于 180px(5 行)时内部滚动 */
     .task-scroll {
-      flex: none; height: 180px; overflow-y: auto; scrollbar-gutter: stable;
+      flex: 1; min-height: 180px; overflow-y: auto; scrollbar-gutter: stable;
       margin: 0 -6px; padding: 0 6px;
     }
     .task-row {
@@ -528,7 +531,7 @@
                        'st-done': taskStatusOf(p.id) === 'done',
                        'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
           <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
-          <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
+          <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).bg }">
             <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img2x || platformLogo(p.id).img"
                  alt="" @error="onLogoError(p.id)">
             <template v-else>{{ platformLogo(p.id).text }}</template>
@@ -671,14 +674,15 @@
         </el-tooltip>
       </div>
 
-      <!-- 最近任务:全平台混排(行首平台徽标),固定 5 行高度、行区独立滚动、
-           触底自动加载更早记录——贴顶堆叠,紧随「发起抓取」卡之后 -->
+      <!-- 最近任务:全平台混排(行首平台徽标),行高锁定 36px;卡片贴顶+贴底
+           (顶部紧随抓取卡,底部贴左栏底边),行区高度随剩余空间伸缩、独立滚动、
+           触底自动加载更早记录 -->
       <div class="card task-card">
         <div class="card-title">最近任务<span class="aux">全平台 · 下滚加载更早</span></div>
         <div class="task-scroll" @scroll="onTaskListScroll">
           <div class="task-row" v-for="t in recentTasks" :key="t.id" @click="showTaskDetail(t)">
             <span class="task-no">#{{ t.id }}</span>
-            <span class="plogo plogo-sm" :style="platformLogo(t.platform).img ? {} : { background: platformLogo(t.platform).color }">
+            <span class="plogo plogo-sm" :style="platformLogo(t.platform).img ? {} : { background: platformLogo(t.platform).bg }">
               <img v-if="platformLogo(t.platform).img" :src="platformLogo(t.platform).img"
                    :srcset="platformLogo(t.platform).srcset" alt="" @error="onLogoError(t.platform)">
               <template v-else>{{ platformLogo(t.platform).text }}</template>

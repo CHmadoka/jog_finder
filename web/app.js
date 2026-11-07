@@ -14,13 +14,15 @@ const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎
 // 1x/2x/3x 三档文件由 scripts/gen_logos.py 按 .plogo 的 CSS 尺寸生成,
 // 浏览器按屏幕像素比直接挑像素对齐的那张,不做运行时缩放(不会发虚)。
 // img2x:顶栏专用 —— 按钮悬停/选中会 transform 放大,固定用 2x 源图保证放大后仍锐利
+// bg:官方图标图块的**实测底色**(采样自 3x 图四角,gen_logos 裁剪后边缘即真实背景),
+//     顶栏品牌主题色与文字徽标回退底色共用同一值;51job 图块为对角渐变,背景值用渐变串
 function logoSrcset(base) {
   return [`${base}.png 1x`, `${base}@2x.png 2x`, `${base}@3x.png 3x`].join(", ");
 }
 const PLATFORM_LOGOS = {
-  boss: { img: "/assets/logo_boss.png", img2x: "/assets/logo_boss@2x.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", color: "#00a6a7" },
-  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", color: "#ff6000" },
-  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", color: "#d8262c" },
+  boss: { img: "/assets/logo_boss.png", img2x: "/assets/logo_boss@2x.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", bg: "#15b3b3" },
+  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", bg: "linear-gradient(135deg, #fc8f1c, #e7014b)" },
+  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", bg: "#ff6400" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
@@ -189,8 +191,8 @@ const app = createApp({
       const t = tables.value.find((x) => x.id === (grab.table_id || 1));
       return t ? t.name : "默认表";
     });
-    // 顶栏品牌主题色背景:当前选中平台的品牌色(未知平台回退空 → 白底)
-    const brandBg = computed(() => (PLATFORM_LOGOS[grab.platform] || {}).color || "");
+    // 顶栏品牌主题色背景:当前选中平台的徽标实测底色(未知平台回退空 → 白底)
+    const brandBg = computed(() => (PLATFORM_LOGOS[grab.platform] || {}).bg || "");
 
     // 任务组合进度:状态卡平台段悬停展开(浮层),comboHover 记录展开的平台 id
     const comboHover = ref(null);
@@ -228,9 +230,9 @@ const app = createApp({
     const logoBroken = reactive({});   // 徽标图片加载失败过的平台
     function platformLogo(pid) {
       const cfg = PLATFORM_LOGOS[pid];
-      if (!cfg) return { img: "", srcset: "", text: (pid || "?").slice(0, 1).toUpperCase(), color: "#8a94a6" };
+      if (!cfg) return { img: "", srcset: "", text: (pid || "?").slice(0, 1).toUpperCase(), bg: "#8a94a6" };
       // 图片 404/解码失败时降级为文字徽标,避免出现裂图占位
-      if (logoBroken[pid]) return { img: "", srcset: "", text: cfg.text, color: cfg.color };
+      if (logoBroken[pid]) return { img: "", srcset: "", text: cfg.text, bg: cfg.bg };
       return cfg;
     }
     function onLogoError(pid) {
