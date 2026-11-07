@@ -244,6 +244,17 @@ const app = createApp({
       const p = platforms.value.find((x) => x.id === pid);
       return !!(p && p.running);
     }
+    // 平台按钮的"最近一次任务结果"临时状态:running 优先;最近任务 error→红灯、
+    // done→绿边框;手动停止(stopped)为中性不变色。新任务启动即覆盖(run 优先)
+    function taskStatusOf(pid) {
+      const s = statuses[pid];
+      if (s && s.running) return "running";
+      const last = s && s.last;
+      if (!last) return "";
+      if (last.status === "error") return "error";
+      if (last.status === "done") return "done";
+      return "";
+    }
     function fmtTime(s) { return s ? String(s).replace("T", " ").slice(0, 16) : "-"; }
     function fmtDate(s) { return s ? String(s).slice(5, 10) : "-"; }
     function fmtSalaryRange(raw) {
@@ -977,7 +988,7 @@ const app = createApp({
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
-      platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
+      platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       platformLogo, onLogoError,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,

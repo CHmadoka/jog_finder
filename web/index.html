@@ -111,6 +111,11 @@
     }
     .badge.on { background: #22c55e; }
     .badge.off { background: #cbd2dc; }
+    .badge.err { background: #dc2626; }
+    /* 最近任务结果的临时状态:完成→绿边框,异常→红边框(新任务启动即覆盖)。
+       定义在 .active 之后:结果状态边框优先于选中态展示 */
+    .psw-item.st-done { border-color: #22c55e; box-shadow: inset 0 0 0 1px #22c55e; }
+    .psw-item.st-error { border-color: #dc2626; box-shadow: inset 0 0 0 1px #dc2626; }
 
     /* ---------- 模式切换 ---------- */
     .seg { display: flex; background: #eef0f6; border-radius: 8px; padding: 3px; gap: 3px; }
@@ -129,6 +134,8 @@
     .cond-summary {
       background: #f7f8fc; border: 1px solid var(--border); border-radius: 8px;
       padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--text2); line-height: 1.9;
+      /* 限高约 4 行:城市/行业标签很多时不再撑高左栏,超出内部滚动 */
+      max-height: 100px; overflow-y: auto; scrollbar-gutter: stable;
     }
     .cond-summary .cs-k { color: var(--text3); display: inline-block; width: 44px; }
     .cond-summary .el-tag { margin-right: 4px; }
@@ -213,7 +220,10 @@
       padding: 3px 8px 4px; background: #fff; transition: border-color .15s;
     }
     .kw-editor:focus-within { border-color: var(--el-color-primary-light-5); }
-    .kw-tags { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 2px; }
+    .kw-tags { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 2px;
+      /* 限高 2 行(tag 24px×2 + gap 4px):城市/词条很多时不再把左栏撑高,
+         超出在标签区内部滚动,保证「最近任务」卡片始终有展示 5 行的空间 */
+      max-height: 52px; overflow-y: auto; scrollbar-gutter: stable; }
     .kw-editor .el-input__wrapper { box-shadow: none !important; background: transparent; padding-left: 1px; }
     .kw-editor .el-cascader { width: 100%; }
     .kw-editor .el-cascader .el-input__wrapper { box-shadow: none !important; background: transparent; padding-left: 1px; }
@@ -265,6 +275,7 @@
     .task-row .plogo-sm { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
     .task-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
     .task-time { color: var(--text3); flex-shrink: 0; }
+    .task-no { color: var(--text3); font-family: Consolas, monospace; flex-shrink: 0; font-size: 11.5px; }
     /* 任务视图横幅:琥珀色调 = "临时镜头"状态提示 */
     .task-banner {
       display: flex; align-items: center; gap: 10px;
@@ -479,8 +490,10 @@
 
         <div class="platform-switch">
           <div v-for="p in platforms" :key="p.id" class="psw-item"
-               :class="{ active: grab.platform === p.id }" @click="switchPlatform(p.id)">
-            <span class="badge" :class="isRunning(p.id) ? 'on' : 'off'"></span>
+               :class="{ active: grab.platform === p.id,
+                         'st-done': taskStatusOf(p.id) === 'done',
+                         'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
+            <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
             <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
               <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img"
                    :srcset="platformLogo(p.id).srcset" alt="" @error="onLogoError(p.id)">
@@ -630,6 +643,7 @@
         <div class="card-title">最近任务<span class="aux">全平台 · 下滚加载更早</span></div>
         <div class="task-scroll" @scroll="onTaskListScroll">
           <div class="task-row" v-for="t in recentTasks" :key="t.id" @click="showTaskDetail(t)">
+            <span class="task-no">#{{ t.id }}</span>
             <span class="plogo plogo-sm" :style="platformLogo(t.platform).img ? {} : { background: platformLogo(t.platform).color }">
               <img v-if="platformLogo(t.platform).img" :src="platformLogo(t.platform).img"
                    :srcset="platformLogo(t.platform).srcset" alt="" @error="onLogoError(t.platform)">
@@ -859,9 +873,10 @@
   </el-drawer>
 
   <!-- ===================== 任务详情卡片 ===================== -->
-  <el-dialog v-model="taskDetailVisible" title="任务详情" width="640px">
+  <el-dialog :title="'任务详情' + (detailTask ? ' #' + detailTask.id : '')" v-model="taskDetailVisible" width="640px">
     <template v-if="detailTask">
       <el-descriptions :column="2" size="small" border>
+        <el-descriptions-item label="任务编号">#{{ detailTask.id }}</el-descriptions-item>
         <el-descriptions-item label="平台">{{ platformOf(detailTask.platform) }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag size="small" effect="light" :type="taskTagType(detailTask.status)">{{ taskText(detailTask.status) }}</el-tag>
