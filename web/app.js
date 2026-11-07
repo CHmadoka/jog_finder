@@ -14,7 +14,10 @@ const RefreshIcon = ElementPlusIconsVue.Refresh;
 const LinkIcon = ElementPlusIconsVue.Link;
 const DeleteIcon = ElementPlusIconsVue.Delete;
 const SettingIcon = ElementPlusIconsVue.Setting;
-const TABLE_MEM_KEY = "jf_current_table";   // 本地记忆:上次选中的数据表
+const TABLE_MEM_KEY = "jf_current_table";   // 本地记忆:右栏浏览的数据表
+const GRAB_TABLE_KEY = "jf_grab_table";     // 本地记忆:左栏存入目标表(与浏览独立)
+const VIEW_PLATFORM_KEY = "jf_view_platform"; // 本地记忆:右栏浏览的平台筛选
+const VIEW_TASK_KEY = "jf_view_task";       // 本地记忆:右栏的任务过滤
 
 // 词条/行业标签输入器:回车添加、必清空、可删除(替代 el-select allow-create,
 // 规避其创建后输入文本残留的问题)
@@ -700,9 +703,20 @@ const app = createApp({
       query.page = 1;
       reloadJobs();
     }
-    // 当前数据表任何变化都本地记忆,下次打开自动恢复
+    // ---------- 界面状态本地记忆(下次打开自动恢复) ----------
+    // 统一用 watch 落盘:程序性变化(如删任务/删表后的回退)同样被记忆,不留脏值
     watch(() => query.table_id, (v) => {
       localStorage.setItem(TABLE_MEM_KEY, String(v || 1));
+    });
+    watch(() => grab.table_id, (v) => {
+      localStorage.setItem(GRAB_TABLE_KEY, String(v || 1));
+    });
+    watch(() => query.platform, (v) => {
+      localStorage.setItem(VIEW_PLATFORM_KEY, v || "");
+    });
+    watch(() => query.task_id, (v) => {
+      if (v) localStorage.setItem(VIEW_TASK_KEY, String(v));
+      else localStorage.removeItem(VIEW_TASK_KEY);
     });
 
     // ---------- 岗位 ----------
@@ -784,16 +798,38 @@ const app = createApp({
         healthText.value = "后端未连接";
       }
       await loadPlatforms();
+      // 恢复右栏浏览平台(独立记忆;非法值忽略,空=全部平台)
+      const viewPlat = localStorage.getItem(VIEW_PLATFORM_KEY) || "";
+      if (viewPlat && platforms.value.some((p) => p.id === viewPlat)) {
+        query.platform = viewPlat;
+      }
       await loadGears();
       await loadTables();
-      // 本地记忆:恢复上次选中的数据表(表已不存在则回默认表)
+      // 本地记忆:恢复上次浏览的数据表(表已不存在则回默认表)
       const savedTid = parseInt(localStorage.getItem(TABLE_MEM_KEY) || "", 10);
       if (savedTid && tables.value.some((t) => t.id === savedTid)) {
         query.table_id = savedTid;
       }
+      // 本地记忆:恢复左栏存入目标表(独立于浏览表;表已不存在则回默认表)
+      const savedGTid = parseInt(localStorage.getItem(GRAB_TABLE_KEY) || "", 10);
+      if (savedGTid && tables.value.some((t) => t.id === savedGTid)) {
+        grab.table_id = savedGTid;
+      }
+      // 本地记忆:恢复任务过滤。候选加载后校验:不在最近候选中(平台不符/
+      // 已删除/超出30条)则放弃恢复,避免打开页面就是空列表
+      await loadTaskOptions();
+      const savedTask = parseInt(localStorage.getItem(VIEW_TASK_KEY) || "", 10);
+      if (savedTask) {
+        const t = taskOptions.value.find((x) => x.id === savedTask);
+        if (t) {
+          query.task_id = savedTask;
+          if (t.platform !== query.platform) query.platform = t.platform;
+        } else {
+          localStorage.removeItem(VIEW_TASK_KEY);
+        }
+      }
       await loadFilters();
       await loadTasks();
-      loadTaskOptions();
       loadEvents();
       reloadJobs();
       await pollStatus();
