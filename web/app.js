@@ -498,7 +498,7 @@ const app = createApp({
       if (errorNotified[pid] === sig) return;
       errorNotified[pid] = sig;
       ElMessageBox.alert(
-        last.message || "任务异常中断,详情见左下角异常面板。",
+        last.message || "任务异常中断,详情见顶栏「抓取异常」面板。",
         `${platformOf(pid)} 抓取已中断`,
         { confirmButtonText: "知道了", type: "error" }
       );
