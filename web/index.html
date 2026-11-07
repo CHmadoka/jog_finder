@@ -355,24 +355,8 @@
           </div>
         </div>
 
-        <!-- 任务选择:选中后右栏按该任务过滤;设置入口可删除任务及其全部数据 -->
-        <div class="field-label" style="margin-top:12px;">任务(选择后右栏按其过滤)</div>
-        <div class="table-combo" style="width:100%">
-          <el-select v-model="grab.selected_task_id" placeholder="选择任务查看其岗位" clearable filterable
-                     style="flex:1; min-width:0" @change="onTaskPick">
-            <el-option v-for="t in taskOptions" :key="t.id" :value="t.id"
-                       :label="'#' + t.id + ' ' + taskText(t.status) + ' ' + fmtDate(t.started_at)">
-              <span>#{{ t.id }} {{ taskText(t.status) }}</span>
-              <span style="float:right; color:#9aa0aa; font-size:12px">{{ fmtDate(t.started_at) }} {{ (t.keywords || '').split('|')[0] }}@{{ fmtCities(t.city) }}</span>
-            </el-option>
-          </el-select>
-          <el-tooltip content="管理任务(删除任务及其全部关联岗位)" placement="top">
-            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTaskDialog"></el-button>
-          </el-tooltip>
-        </div>
-
         <!-- 存入目标表:抓取结果固定写入该表,与右栏浏览的工作表筛选分离 -->
-        <div class="field-label" style="margin-top:10px;">存入数据表(与右侧浏览无关)</div>
+        <div class="field-label" style="margin-top:12px;">存入数据表(与右侧浏览无关)</div>
         <div class="table-combo" style="width:100%">
           <el-select v-model="grab.table_id" style="flex:1; min-width:0">
             <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
@@ -523,6 +507,20 @@
         <el-select v-model="query.platform" placeholder="全部平台" clearable style="width:120px" @change="reloadJobs">
           <el-option v-for="p in platforms" :key="p.id" :label="p.name" :value="p.id"></el-option>
         </el-select>
+        <!-- 任务过滤:按抓取任务查看数据(crawl_task_id);设置入口可删除任务及其全部数据 -->
+        <div class="table-combo">
+          <el-select v-model="query.task_id" placeholder="按任务过滤" clearable filterable
+                     style="width:180px" @change="onTaskPick">
+            <el-option v-for="t in taskOptions" :key="t.id" :value="t.id"
+                       :label="'#' + t.id + ' ' + taskText(t.status) + ' ' + fmtDate(t.started_at)">
+              <span>#{{ t.id }} {{ taskText(t.status) }}</span>
+              <span style="float:right; color:#9aa0aa; font-size:12px">{{ fmtDate(t.started_at) }} {{ (t.keywords || '').split('|')[0] }}@{{ fmtCities(t.city) }}</span>
+            </el-option>
+          </el-select>
+          <el-tooltip content="管理任务(删除任务及其全部关联岗位)" placement="top">
+            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTaskDialog"></el-button>
+          </el-tooltip>
+        </div>
         <el-input v-model="query.q" placeholder="搜索职位 / 公司" clearable style="width:220px" :prefix-icon="SearchIcon">
           <template #suffix></template>
         </el-input>
@@ -534,14 +532,6 @@
         <el-tooltip content="刷新列表与统计">
           <el-button :icon="RefreshIcon" circle @click="reloadJobs"></el-button>
         </el-tooltip>
-      </div>
-
-      <!-- 任务过滤提示:从任务详情/岗位详情跳转而来,点 × 返回常规筛选 -->
-      <div v-if="query.task_id" style="display:flex; align-items:center; gap:8px; margin:4px 0 2px;">
-        <el-tag type="warning" effect="light" closable @close="clearTaskFilter">
-          任务 #{{ query.task_id }} 的关联岗位
-        </el-tag>
-        <el-text type="info" size="small">按抓取任务过滤(已忽略工作表筛选)</el-text>
       </div>
 
       <!-- 统计条 -->

@@ -47,6 +47,7 @@ class TaskOut(BaseModel):
     found: int
     saved: int
     skipped: int
+    job_count: int = 0           # 关联岗位数(crawl_task_id 指向本任务;删除确认/免确认依据)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     filter_snapshot: dict[str, Any] = Field(default_factory=dict)

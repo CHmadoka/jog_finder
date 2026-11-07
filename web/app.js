@@ -102,7 +102,6 @@ const app = createApp({
 
     // 左栏:抓取配置(只影响"发起抓取")
     // table_id: 存入目标表(与右栏浏览筛选完全分离,新岗位固定存入该表)
-    // selected_task_id: 左栏任务选择框(选中后右栏按该任务过滤)
     const grab = reactive({
       platform: "boss",
       mode: "quick",            // quick | saved
@@ -115,7 +114,6 @@ const app = createApp({
       max_pages: 10,
       all_keywords: true,
       table_id: 1,              // 抓取结果存入的数据表
-      selected_task_id: null,   // 关联查看的任务(空 = 不过滤)
     });
 
     // 右栏:岗位浏览筛选(默认按最后更新时间倒序)
@@ -322,8 +320,9 @@ const app = createApp({
       recentTasks.value = await api(`/tasks?platform=${grab.platform}&limit=5`);
     }
     async function loadTaskOptions() {
-      // 左栏任务选择框候选:当前平台最近 30 条(含状态/时间/词条摘要)
-      try { taskOptions.value = await api(`/tasks?platform=${grab.platform}&limit=30`); } catch (e) {}
+      // 右栏任务下拉候选:跟随浏览区平台筛选(空=全部平台),最近 30 条
+      const pf = query.platform ? `&platform=${query.platform}` : "";
+      try { taskOptions.value = await api(`/tasks?limit=30${pf}`); } catch (e) {}
     }
     async function pollStatus() {
       try {
@@ -393,42 +392,44 @@ const app = createApp({
       loadJobs();
     }
 
-    // 左栏平台切换:只影响抓取上下文,不动右栏筛选
+    // 左栏平台切换:只影响抓取上下文,不动右栏筛选(浏览区独立)
     async function switchPlatform(pid) {
       if (grab.platform === pid) return;
       grab.platform = pid;
       grab.filter_id = null;   // 条件按平台隔离
-      grab.selected_task_id = null;   // 任务候选按平台隔离
-      query.task_id = null;    // 任务按平台隔离:切平台即退出任务过滤视图
       await loadFilters();
       loadTasks();
-      loadTaskOptions();
     }
     function switchMode(m) { grab.mode = m; }
 
     // ---------- 任务 ↔ 数据 双向关联 ----------
-    // 从任务详情/岗位详情跳转:右栏按任务过滤(crawl_task_id=产生/最后更新该岗位的任务)
+    // 通用跳转(任务详情卡片/岗位详情"来源任务"):右栏按任务过滤并联动平台
     function viewTaskJobs(taskId, platform) {
       if (!taskId) return;
       query.task_id = taskId;
-      if (platform) query.platform = platform;   // 联动任务所属平台
+      if (platform) query.platform = platform;
       query.page = 1;
       showDetail.value = false;
       taskDetailVisible.value = false;
       reloadJobs();
+    }
+    // 右栏任务下拉(平台选择框后):v-model 直接绑 query.task_id
+    function onTaskPick(tid) {
+      if (tid) {
+        // 选中任务联动其所属平台,避免"任务A + 平台B"组合查出空结果
+        const t = taskOptions.value.find((x) => x.id === tid);
+        viewTaskJobs(tid, t && t.platform);
+      } else {
+        clearTaskFilter();
+      }
     }
     function clearTaskFilter() {
       query.task_id = null;
       query.page = 1;
       reloadJobs();
     }
-    // 左栏任务选择框:选中即右栏按任务过滤,清空即还原
-    function onTaskPick(tid) {
-      if (tid) viewTaskJobs(tid, grab.platform);
-      else clearTaskFilter();
-    }
-    // 右栏过滤状态变化(任意入口)同步回左栏下拉,两处显示一致
-    watch(() => query.task_id, (v) => { grab.selected_task_id = v || null; });
+    // 右栏平台筛选变化时,任务候选跟随(空=全部平台的任务)
+    watch(() => query.platform, () => loadTaskOptions());
 
     // ---------- 任务管理(删除任务及其全部岗位数据) ----------
     function openTaskDialog() {
@@ -436,21 +437,23 @@ const app = createApp({
       loadTaskOptions();
     }
     async function delTask(t) {
-      const n = t.saved ?? 0;
-      await ElMessageBox.confirm(
-        `删除任务 #${t.id}(${taskText(t.status)} ${fmtDate(t.started_at)})?`
-        + ` 该任务关联的全部岗位数据将一并删除(含新入库 ${n} 条及被该任务更新过的岗位),不可恢复。`,
-        "删除任务", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
-      );
+      const n = t.job_count || 0;
+      // 无任何关联岗位的任务:不二次确认,直接删除
+      if (n > 0) {
+        await ElMessageBox.confirm(
+          `删除任务 #${t.id}(${taskText(t.status)} ${fmtDate(t.started_at)})?`
+          + ` 该任务关联的 ${n} 条岗位数据将一并删除,不可恢复。`,
+          "删除任务", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+        );
+      }
       try {
         const r = await api(`/tasks/${t.id}`, { method: "DELETE" });
-        ElMessage.success(`任务 #${t.id} 已删除,清除岗位 ${r.deleted_jobs} 条`);
+        ElMessage.success(`任务 #${t.id} 已删除` + (r.deleted_jobs ? `,清除岗位 ${r.deleted_jobs} 条` : "(无关联岗位)"));
       } catch (e) {
         return;   // 失败(如运行中):api 层已弹错误提示
       }
       // 删除的是当前正在查看的任务:退出任务过滤视图
       if (query.task_id === t.id) clearTaskFilter();
-      if (grab.selected_task_id === t.id) grab.selected_task_id = null;
       loadTaskOptions();   // 弹窗保持打开,列表刷新后可继续删除其它任务
       loadTasks();
       reloadJobs();
@@ -662,12 +665,16 @@ const app = createApp({
       if ((query.table_id || 1) === row.id) reloadJobs();
     }
     async function delTable(row) {
-      await ElMessageBox.confirm(
-        `是否要删除表「${row.name}」并清除所有表数据?表内 ${row.job_count || 0} 条岗位将一并删除,且不可恢复。`,
-        "删除数据表", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
-      );
+      const n = row.job_count || 0;
+      // 空表(无任何岗位数据):不二次确认,直接删除
+      if (n > 0) {
+        await ElMessageBox.confirm(
+          `是否要删除表「${row.name}」并清除所有表数据?表内 ${n} 条岗位将一并删除,且不可恢复。`,
+          "删除数据表", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+        );
+      }
       await api(`/tables/${row.id}`, { method: "DELETE" });
-      ElMessage.success("已删除");
+      ElMessage.success("已删除" + (n ? `,清除岗位 ${n} 条` : "(空表)"));
       // 删除的是当前选中的表:自动切回默认表并刷新列表
       if ((query.table_id || 1) === row.id) {
         query.table_id = 1;

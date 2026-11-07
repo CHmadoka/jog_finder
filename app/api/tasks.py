@@ -118,7 +118,20 @@ def task_history(platform: str | None = None, limit: int = 20, db: Session = Dep
     q = db.query(CrawlTask).order_by(CrawlTask.id.desc()).limit(limit)
     if platform:
         q = db.query(CrawlTask).filter(CrawlTask.platform == platform).order_by(CrawlTask.id.desc()).limit(limit)
-    return q.all()
+    rows = q.all()
+    # 附加每个任务的关联岗位数(前端:删除确认与"空任务免确认"判断)
+    if rows:
+        from sqlalchemy import func
+
+        counts = dict(
+            db.query(Job.crawl_task_id, func.count(Job.id))
+            .filter(Job.crawl_task_id.in_([t.id for t in rows]))
+            .group_by(Job.crawl_task_id)
+            .all()
+        )
+        for t in rows:
+            t.job_count = counts.get(t.id, 0)
+    return rows
 
 
 @router.delete("/tasks/{task_id}")
