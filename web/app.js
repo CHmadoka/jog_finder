@@ -383,11 +383,13 @@ const app = createApp({
     const highlightedDesc = computed(() => highlightText((currentJob.value || {}).description));
     // 标题高亮:入库匹配规则同样看标题,标题一并高亮
     const highlightedTitle = computed(() => highlightText((currentJob.value || {}).title));
-    // 异常面板为悬浮二级卡片:点击面板与唤起按钮以外的空白处即收起
+    // 异常面板收起规则:仅唤起胶囊与面板内的可交互内容(异常行/头部按钮)豁免;
+    // 面板自身的边距与空白区域(头部标题行空白、body 两侧留白)视同面板外,点击即收起
     function onDocClick(ev) {
       if (!eventsOpen.value) return;
       const t = ev.target;
-      if (t.closest && (t.closest(".event-panel") || t.closest(".event-fab"))) return;
+      if (t.closest && (t.closest(".event-fab") || t.closest(".ep-row")
+        || t.closest(".ep-head .el-button"))) return;
       eventsOpen.value = false;
     }
 
@@ -934,6 +936,9 @@ const app = createApp({
     watch(currentJob, (v) => { if (v) showDetail.value = true; });
 
     onMounted(async () => {
+      // 全局点击收起异常面板:注册必须放在所有 await 之前 —— 任一接口失败中断
+      // onMounted 时面板"点外面收不起来";capture 阶段触发,免受 @click.stop 影响
+      document.addEventListener("click", onDocClick, true);
       await loadPlatforms();
       // 恢复右栏浏览平台(独立记忆;非法值忽略,空=全部平台)
       const viewPlat = localStorage.getItem(VIEW_PLATFORM_KEY) || "";
@@ -973,11 +978,10 @@ const app = createApp({
       reloadJobs();
       await pollStatus();
       timer = setInterval(pollStatus, 3000);
-      document.addEventListener("click", onDocClick);
     });
     onUnmounted(() => {
       clearInterval(timer);
-      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("click", onDocClick, true);
     });
 
     return {
