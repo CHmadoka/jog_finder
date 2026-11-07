@@ -192,12 +192,18 @@ const app = createApp({
     // 顶栏品牌主题色背景:当前选中平台的品牌色(未知平台回退空 → 白底)
     const brandBg = computed(() => (PLATFORM_LOGOS[grab.platform] || {}).color || "");
 
-    // 任务组合进度:顶部状态段悬停展开(浮层),comboHover 记录展开的平台 id
+    // 任务组合进度:状态卡平台段悬停展开(浮层),comboHover 记录展开的平台 id
     const comboHover = ref(null);
-    // 正在运行的平台列表(顶部中心状态区数据源;过滤 pollStatus 的 *_was 辅助键)
-    const runningPlatforms = computed(() => Object.entries(statuses)
-      .filter(([pid, s]) => s && s.running && !pid.endsWith("_was"))
-      .map(([pid, s]) => ({ pid, status: s })));
+    // 状态卡段列表(常驻显示):当前平台恒在首位(运行中带计数/进度,空闲显示空闲态),
+    // 其后追加其它运行中平台(多平台并发同屏);过滤 pollStatus 的 *_was 辅助键
+    const statusSegments = computed(() => {
+      const segs = [{ pid: grab.platform, status: statuses[grab.platform] || {} }];
+      for (const [pid, s] of Object.entries(statuses)) {
+        if (pid.endsWith("_was") || pid === grab.platform) continue;
+        if (s && s.running) segs.push({ pid, status: s });
+      }
+      return segs;
+    });
 
     // ---------- 工具 ----------
     async function api(path, opts = {}) {
@@ -984,7 +990,7 @@ const app = createApp({
       currentStatus, running, canStart, startHint,
       sortState, skipTipOf, currentTableName, brandBg,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
-      kwCount, cityLabel, runningPlatforms,
+      kwCount, cityLabel, statusSegments,
       platformLogo, onLogoError,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,

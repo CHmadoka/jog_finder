@@ -84,13 +84,14 @@
     .top-plat.st-done { box-shadow: 0 0 0 1.5px #22c55e; }
     .top-plat.st-error { box-shadow: 0 0 0 1.5px #dc2626; }
 
-    /* ---------- 运行状态卡(左栏,位于「最近任务」卡片上方;全空闲整卡隐藏不占位) ---------- */
-    /* 多平台并发同屏:每平台一段 —— 上行 圆点+平台名+计数徽章,下行 进度单行省略 */
+    /* ---------- 运行状态卡(左栏,常驻;位于「最近任务」卡片上方) ---------- */
+    /* 段列表:当前平台恒在首位(空闲显示空闲态+最近一次进度),其它运行中平台随后 */
     .status-card { flex: none; }
     .ts-item { position: relative; }
     .ts-item + .ts-item { margin-top: 10px; }
     .ts-line { display: flex; align-items: center; gap: 7px; }
     .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
+    .ts-idle { font-size: 12px; color: var(--text3); }
     .ts-counters { display: flex; gap: 4px; margin-left: auto; }
     .ts-progress {
       font-size: 12px; color: var(--text2); margin-top: 4px;
@@ -631,27 +632,29 @@
         </el-tooltip>
       </div>
 
-      <!-- 运行状态:多平台并发同屏,位于「最近任务」卡片上方(全空闲时整卡隐藏,不占位)。
-           每平台一段:上行 圆点+平台名+计数徽章(跳过徽章悬停显示原因明细),
-           下行 进度单行省略;悬停平台段向下浮层展开任务组合(词条×城市) -->
-      <div class="card status-card" v-if="runningPlatforms.length">
+      <!-- 运行状态:常驻卡片,位于「最近任务」卡片上方(任务卡贴底的 auto 外边距
+           恰好把它推到任务卡正上方)。段列表 = 当前平台(始终显示:运行中带计数/进度,
+           空闲显示空闲态与最近一次进度)+ 其它运行中平台(多平台并发同屏);
+           悬停运行中的平台段向下浮层展开任务组合(词条×城市) -->
+      <div class="card status-card">
         <div class="card-title">运行状态</div>
-        <div class="ts-item" v-for="rp in runningPlatforms" :key="rp.pid"
-             @mouseenter="comboHover = rp.pid" @mouseleave="comboHover = null">
+        <div class="ts-item" v-for="seg in statusSegments" :key="seg.pid"
+             @mouseenter="comboHover = seg.pid" @mouseleave="comboHover = null">
           <div class="ts-line">
-            <span class="dot on"></span>
-            <span class="ts-name">{{ platformOf(rp.pid) }}</span>
-            <span class="ts-counters" v-if="rp.status.counters">
-              <span class="tsc">发现 {{ rp.status.counters.found || 0 }}</span>
-              <span class="tsc save">入库 {{ rp.status.counters.saved || 0 }}</span>
-              <span class="tsc skip" :title="skipTipOf(rp.pid)">跳过 {{ rp.status.counters.skipped || 0 }}</span>
+            <span class="dot" :class="seg.status.running ? 'on' : 'off'"></span>
+            <span class="ts-name">{{ platformOf(seg.pid) }}</span>
+            <span class="ts-idle" v-if="!seg.status.running">空闲</span>
+            <span class="ts-counters" v-if="seg.status.running && seg.status.counters">
+              <span class="tsc">发现 {{ seg.status.counters.found || 0 }}</span>
+              <span class="tsc save">入库 {{ seg.status.counters.saved || 0 }}</span>
+              <span class="tsc skip" :title="skipTipOf(seg.pid)">跳过 {{ seg.status.counters.skipped || 0 }}</span>
             </span>
           </div>
-          <div class="ts-progress" :title="rp.status.progress">{{ rp.status.progress || '正在准备…' }}</div>
-          <div class="combo-pop" v-if="rp.status.combos && comboHover === rp.pid">
-            <div class="combo-line" v-for="(c, i) in rp.status.combos.items" :key="i"
+          <div class="ts-progress" v-if="seg.status.progress" :title="seg.status.progress">{{ seg.status.progress }}</div>
+          <div class="combo-pop" v-if="seg.status.running && seg.status.combos && comboHover === seg.pid">
+            <div class="combo-line" v-for="(c, i) in seg.status.combos.items" :key="i"
                  :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
-              <span class="c-idx">{{ i + 1 }}/{{ rp.status.combos.total }}</span>
+              <span class="c-idx">{{ i + 1 }}/{{ seg.status.combos.total }}</span>
               <span class="c-kw">「{{ c.kw }}」</span>
               <span class="c-city">@{{ c.city || '全国' }}</span>
               <span class="c-mark">{{ c.state === 'done' ? '✓' : (c.state === 'running' ? '▶' : '·') }}</span>
