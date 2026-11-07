@@ -353,7 +353,7 @@ const app = createApp({
       return esc.replace(new RegExp(`(${parts.join("|")})`, "gi"), "<mark>$1</mark>");
     }
     const highlightedDesc = computed(() => highlightText((currentJob.value || {}).description));
-    // 标题高亮:入库匹配规则同样看标题(未命中词条会记"标题未直接命中"),标题一并高亮
+    // 标题高亮:入库匹配规则同样看标题,标题一并高亮
     const highlightedTitle = computed(() => highlightText((currentJob.value || {}).title));
     // 异常面板为悬浮二级卡片:点击面板与唤起按钮以外的空白处即收起
     function onDocClick(ev) {
@@ -872,8 +872,8 @@ const app = createApp({
 
     onMounted(async () => {
       try {
-        const h = await api("/health");
-        healthText.value = h.llm ? "LLM 备注已启用" : "规则备注(未配置 LLM)";
+        await api("/health");
+        healthText.value = "规则备注已启用";
       } catch (e) {
         healthText.value = "后端未连接";
       }

@@ -1,7 +1,9 @@
-"""过滤引擎:活跃度过滤、查重由调度器完成;此处做规则+行业偏好+LLM 备注判定。
+"""过滤引擎:活跃度过滤、查重由调度器完成;此处做规则+行业偏好备注判定。
 
 行业偏好设计参考实战实例:筛选条件(extras)可配置
 industries_avoid(避开行业关键词数组)、industries_prefer(优先行业关键词数组)。
+
+判定只写备注,不拦截入库;唯一会拒绝入库的是活跃度窗口。
 """
 from __future__ import annotations
 
@@ -10,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .activity import within_active_window
-from .llm_analyzer import llm_analyzer
 from .rules import rule_engine
 
 
@@ -20,8 +21,6 @@ class FilterResult:
 
     dropped: bool = False          # 不入库(活跃度窗口外)
     drop_reason: str = ""
-    fit: bool | None = None        # 是否匹配档位,None=未分析
-    fit_score: float | None = None
     reasons: list[str] = field(default_factory=list)   # 不符合原因
     pluses: list[str] = field(default_factory=list)    # 契合点(写入备注前缀)
 
@@ -57,17 +56,12 @@ def _industry_hit(industry: str, keywords: list[str]) -> list[str]:
     return hits
 
 
-async def evaluate_job(
-    draft,
-    gear_name: str,
-    keywords: list[str],
-    extras: dict[str, Any] | None = None,
-) -> FilterResult:
-    """入库前综合评估:活跃度 → 行业偏好 → 规则 → LLM。"""
+def evaluate_job(draft, extras: dict[str, Any] | None = None) -> FilterResult:
+    """入库前综合评估:活跃度 → 行业偏好 → 关键词规则。"""
     extras = extras or {}
     result = FilterResult()
 
-    # 1) 活跃度窗口(不入库)
+    # 1) 活跃度窗口(唯一会拒绝入库的判定)
     ok, why = within_active_window(draft.hr_active_at, draft.published_at)
     if not ok:
         result.dropped = True
@@ -90,35 +84,7 @@ async def evaluate_job(
 
     # 3) 关键词规则(总是执行)
     result.reasons.extend(rule_engine.match(draft))
-    # 标题与档位词条的软匹配提示
-    title = draft.title or ""
-    if keywords and not any(kw.lower() in title.lower() for kw in keywords):
-        result.reasons.append(f"标题未直接命中档位[{gear_name}]词条")
-    # TODO(契合判定): HR 在线状态仅作展示信号,不作为契合判据;
-    # 契合判定依赖后续独立的筛选引擎(行业偏好权重/描述规则等),接入后在此补充。
-
-    # 4) LLM 分析(可选;未配置 key 时仅用规则)
-    if llm_analyzer.enabled:
-        try:
-            verdict = await llm_analyzer.analyze(
-                draft, gear_name, keywords,
-                avoid=avoid, prefer=prefer,
-            )
-            result.fit = bool(verdict.get("fit"))
-            result.fit_score = verdict.get("score")
-            for r in verdict.get("reasons") or []:
-                if r and r not in result.reasons:
-                    result.reasons.append(r)
-            if result.fit:
-                # 判定匹配时清掉软提示类原因,保留硬信号
-                result.reasons = [
-                    r for r in result.reasons
-                    if not r.startswith(("标题未直接命中", "行业非优先列表"))
-                ]
-        except Exception as exc:  # noqa: BLE001
-            # LLM 失败不影响入库,保留规则结论
-            result.reasons.append(f"LLM分析失败({exc})")
-
+    # 契合/不符标记(fit)由外部评估写入数据库,本引擎不产出
     return result
 
 

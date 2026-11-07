@@ -102,7 +102,7 @@ class Job(Base):
     welfare = Column(String(300), default="", comment="福利标签")
     hr_online = Column(Boolean, default=False, comment="HR当前在线")
     remark = Column(Text, default="", comment="不符合原因备注(自动生成)")
-    fit = Column(Boolean, nullable=True, comment="LLM/规则判定是否匹配,None=未分析")
+    fit = Column(Boolean, nullable=True, comment="契合/不符(外部评估写入;抓取流程不产出)")
     fit_score = Column(Float, nullable=True, comment="匹配度 0-1")
     first_seen_at = Column(DateTime, default=now_local, index=True)
     updated_at = Column(DateTime, default=now_local, onupdate=now_local)

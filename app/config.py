@@ -36,11 +36,6 @@ class Config:
     HR_ACTIVE_DAYS: int = _env_int("HR_ACTIVE_DAYS", 7)
     JOB_PUBLISH_DAYS: int = _env_int("JOB_PUBLISH_DAYS", 7)
 
-    # LLM
-    LLM_API_BASE: str = os.getenv("LLM_API_BASE", "")
-    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
-
     # 服务
     HOST: str = os.getenv("HOST", "127.0.0.1")
     PORT: int = _env_int("PORT", 8765)
@@ -60,10 +55,6 @@ class Config:
     @property
     def cdp_endpoint(self) -> str:
         return f"http://127.0.0.1:{self.CDP_PORT}"
-
-    @property
-    def llm_enabled(self) -> bool:
-        return bool(self.LLM_API_KEY and self.LLM_API_BASE)
 
 
 config = Config()

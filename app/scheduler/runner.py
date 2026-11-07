@@ -314,8 +314,10 @@ def _db_insert_job(
             crawl_task_id=task_id,
             table_id=table_id or 1,
             remark=result.remark,
-            fit=result.fit,
-            fit_score=result.fit_score,
+            # fit/fit_score 保留字段但不再自动产出(外部评估可写入,见 `推荐清单`);
+            # 新抓取的岗位这两个字段为空,界面不显示契合/不符标签
+            fit=None,
+            fit_score=None,
         )
         db.add(job)
         db.commit()
@@ -769,7 +771,6 @@ class Scheduler:
             n = await asyncio.to_thread(_db_add_events, plat.id, items)
             if n:
                 progress(f"⚠ 记录 {n} 条解析异常(见左下角异常面板,可点击跳转)")
-        gear_name, keywords = snap.get("gear", ""), snap.get("keywords", [])
         # 对齐实例:详情页跳回首页/异常跳转视为岗位已下线,不入库
         if draft.raw.get("offline"):
             progress(f"跳过「{draft.title}」: 岗位已下线或链接失效")
@@ -797,9 +798,7 @@ class Scheduler:
             bump("已存在")
             return "skipped"
 
-        result = await evaluate_job(
-            draft, gear_name, keywords, extras=snap.get("extras") or {}
-        )
+        result = evaluate_job(draft, extras=snap.get("extras") or {})
         if result.dropped:
             progress(f"跳过「{draft.title}」: {result.drop_reason}")
             bump("活跃度/新鲜度窗口")

@@ -52,7 +52,7 @@ if config.WEB_DIR.exists():
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "llm": config.llm_enabled}
+    return {"ok": True}
 
 
 def _port_in_use(host: str, port: int, timeout: float = 1.0) -> bool:
