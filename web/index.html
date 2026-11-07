@@ -212,6 +212,18 @@
     .dot.off { background: #cbd2dc; }
     @keyframes blink { 50% { opacity: .4; } }
     .progress-text { font-size: 12px; color: var(--text2); line-height: 1.7; word-break: break-all; margin-top: 8px; }
+    /* 任务组合进度:当前组合单行;悬停向下展开全部分组(词条/城市分行显示) */
+    .combo-box { margin-top: 6px; font-size: 12px; line-height: 1.9; }
+    .combo-line { display: flex; gap: 6px; align-items: center; padding: 1px 0; color: var(--text2); }
+    .combo-line .c-idx { color: var(--text3); flex-shrink: 0; min-width: 36px; font-variant-numeric: tabular-nums; }
+    .combo-line .c-kw { color: var(--el-text-color-primary); }
+    .combo-line .c-city { color: var(--text3); }
+    .combo-line .c-mark { margin-left: auto; color: var(--text3); }
+    .combo-line.current { color: var(--el-color-primary); cursor: default; }
+    .combo-line.is-running { color: var(--el-color-primary); }
+    .combo-line.is-running .c-mark { color: var(--el-color-primary); }
+    .combo-line.is-done { opacity: .55; }
+    .combo-line.is-done .c-mark { color: var(--el-color-success); }
     .counters { display: flex; gap: 8px; margin-top: 10px; }
     .counter {
       flex: 1; background: #f7f8fc; border-radius: 8px; text-align: center; padding: 8px 0;
@@ -464,6 +476,27 @@
         </div>
         <template v-if="running || currentStatus.progress">
           <div class="progress-text">{{ currentStatus.progress || '正在准备…' }}</div>
+          <!-- 任务组合(词条×城市)进度:默认仅当前组合,悬停向下展开全部 -->
+          <div class="combo-box" v-if="running && currentStatus.combos"
+               @mouseenter="comboHover = true" @mouseleave="comboHover = false">
+            <template v-if="!comboHover">
+              <div class="combo-line current" v-if="comboCur">
+                <span class="c-idx">{{ comboCur.idx }}/{{ currentStatus.combos.total }}</span>
+                <span class="c-kw">「{{ comboCur.kw }}」</span>
+                <span class="c-city">@{{ comboCur.city || '全国' }}</span>
+                <span class="c-mark" title="悬停展开全部组合">▾</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="combo-line" v-for="(c, i) in currentStatus.combos.items" :key="i"
+                   :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
+                <span class="c-idx">{{ i + 1 }}/{{ currentStatus.combos.total }}</span>
+                <span class="c-kw">「{{ c.kw }}」</span>
+                <span class="c-city">@{{ c.city || '全国' }}</span>
+                <span class="c-mark">{{ c.state === 'done' ? '✓' : (c.state === 'running' ? '▶' : '·') }}</span>
+              </div>
+            </template>
+          </div>
           <div class="counters" v-if="currentStatus.counters">
             <div class="counter"><div class="num">{{ currentStatus.counters.found || 0 }}</div><div class="lbl">发现</div></div>
             <div class="counter"><div class="num" style="color:var(--el-color-primary)">{{ currentStatus.counters.saved || 0 }}</div><div class="lbl">新入库</div></div>
@@ -756,7 +789,6 @@
   <el-dialog v-model="gearVisible" title="岗位设置管理" width="660px">
     <div class="dlg-formline">
       <el-button type="primary" @click="createGear"><el-icon><Plus /></el-icon>添加岗位设置</el-button>
-      <span class="muted">自动命名「新岗位设置_n」,岗位词条可缺省</span>
     </div>
     <div class="dlg-list">
       <div class="dlg-row" v-for="g in gears" :key="g.id">
@@ -867,7 +899,6 @@
   <el-dialog v-model="tableVisible" title="数据表管理" width="600px">
     <div class="dlg-formline">
       <el-button type="primary" @click="createTable"><el-icon><Plus /></el-icon>新建数据表</el-button>
-      <span class="muted">自动命名「新数据表_n」,标识符「数据表_id」</span>
     </div>
     <div class="dlg-list">
       <div class="dlg-row" v-for="t in tables" :key="t.id">

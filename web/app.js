@@ -179,6 +179,16 @@ const app = createApp({
       return t ? t.name : "默认表";
     });
 
+    // 任务组合进度:默认只显示当前组合行,悬停向下展开全部组合(词条×城市)
+    const comboHover = ref(false);
+    const comboCur = computed(() => {
+      const cb = currentStatus.value.combos;
+      if (!cb || !cb.items) return null;
+      const idx = cb.items.findIndex((c) => c.state === "running");
+      if (idx < 0) return null;
+      return { idx: idx + 1, kw: cb.items[idx].kw, city: cb.items[idx].city };
+    });
+
     // ---------- 工具 ----------
     async function api(path, opts = {}) {
       const resp = await fetch("/api" + path, {
@@ -802,6 +812,7 @@ const app = createApp({
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,
+      comboHover, comboCur,
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,

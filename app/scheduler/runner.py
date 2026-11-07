@@ -326,6 +326,9 @@ class Scheduler:
         self._last_result: dict[str, dict] = {}
         # platform -> 运行中的 crawl_task id(删除任务接口用于拒绝删除运行中任务)
         self._running_task_ids: dict[str, int] = {}
+        # platform -> 任务组合(词条×城市)进度 {"total": n, "items": [{kw, city, state}]}
+        # state: pending(未开始)/running(进行中)/done(已完成)。状态卡悬停展开显示。
+        self._combos: dict[str, dict] = {}
 
     # ---------- 状态 ----------
     def is_running(self, platform: str) -> bool:
@@ -352,10 +355,13 @@ class Scheduler:
                 entry["last"] = last
             out[p.id] = entry
         for pid, task in self._tasks.items():
-            out.setdefault(pid, {"running": False, "progress": "", "counters": {}})
-            out[pid]["running"] = not task.done()
-            out[pid]["progress"] = self._progress.get(pid, "")
-            out[pid]["counters"] = self._counters.get(pid, {})
+            entry = out.setdefault(pid, {"running": False, "progress": "", "counters": {}})
+            entry["running"] = not task.done()
+            entry["progress"] = self._progress.get(pid, "")
+            entry["counters"] = self._counters.get(pid, {})
+            combos = self._combos.get(pid)
+            if combos:
+                entry["combos"] = combos
         return out
 
     def request_stop(self, platform: str) -> bool:
@@ -652,10 +658,14 @@ class Scheduler:
                 cities = [c.strip() for c in str(snap["city"]).split(",") if c.strip()]
             combos = [(kw, c) for kw in kw_list for c in (cities or [""])]
             total = len(combos)
+            # 组合进度(状态卡悬停展开显示):每组合 {kw, city, state: pending/running/done}
+            combo_items = [{"kw": kw, "city": c, "state": "pending"} for (kw, c) in combos]
+            self._combos[platform] = {"total": total, "items": combo_items}
             for idx, (kw, cur_city) in enumerate(combos, start=1):
                 if stop.is_set():
                     status, message = "stopped", "用户手动停止"
                     break
+                combo_items[idx - 1]["state"] = "running"
                 loc = f"@{cur_city}" if cur_city else "@全国"
                 progress(f"任务组合 {idx}/{total}: 「{kw}」{loc} 开始")
                 async for draft in plat.iter_jobs(
@@ -691,6 +701,8 @@ class Scheduler:
                     from ..utils import human_delay
 
                     await human_delay()
+                if not stop.is_set():
+                    combo_items[idx - 1]["state"] = "done"
             if not stop.is_set() and status == "done":
                 status = "done"
 
@@ -734,6 +746,7 @@ class Scheduler:
             }
             self._tasks.pop(platform, None)
             self._stops.pop(platform, None)
+            self._combos.pop(platform, None)
             if self._running_task_ids.get(platform) == task_id:
                 self._running_task_ids.pop(platform, None)
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)
