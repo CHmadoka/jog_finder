@@ -109,6 +109,8 @@ const app = createApp({
     const jobs = reactive({ total: 0, items: [] });
     const stats = reactive({ total: 0, fit: 0, unfit: 0, online: 0 });
     const recentTasks = ref([]);
+    // 最近任务卡片滚动加载状态:limit 递增(5→15→25…),done=返回条数<limit
+    const taskList = reactive({ limit: 5, loading: false, done: false });
     const taskOptions = ref([]);      // 左栏任务选择框候选(当前平台最近30条)
     const taskMgrVisible = ref(false);
     const healthText = ref("检测连接...");
@@ -415,7 +417,24 @@ const app = createApp({
     async function loadTasks() {
       // 最近任务 = 全部平台混排(带平台徽标):任务记录不应被左栏当前平台隐藏,
       // 否则"刚跑完的任务在界面上找不到"——用户在 boss 视图下看不到 job51/liepin 的记录
-      recentTasks.value = await api(`/tasks?limit=5`);
+      // 卡片内滚动 + 触底懒加载:limit 递增重拉(id desc 排序稳定,天然增量)
+      if (taskList.loading) return;
+      taskList.loading = true;
+      try {
+        const rows = await api(`/tasks?limit=${taskList.limit}`);
+        recentTasks.value = rows;
+        taskList.done = rows.length < taskList.limit;
+      } finally {
+        taskList.loading = false;
+      }
+    }
+    function onTaskListScroll(e) {
+      const el = e.target;
+      if (taskList.loading || taskList.done) return;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
+        taskList.limit += 10;
+        loadTasks();
+      }
     }
     async function loadTaskOptions() {
       // 右栏任务下拉候选:跟随浏览区平台筛选(空=全部平台),最近 30 条
@@ -501,11 +520,16 @@ const app = createApp({
     function switchMode(m) { grab.mode = m; }
 
     // ---------- 任务 ↔ 数据 双向关联 ----------
-    // 通用跳转(任务详情卡片/岗位详情"来源任务"):右栏按任务过滤并联动平台
-    function viewTaskJobs(taskId, platform) {
+    // 通用跳转(任务详情卡片/岗位详情"来源任务"/右栏任务下拉):
+    // 右栏进入"任务视图"——按任务过滤并联动平台。
+    // tableId: 任务数据真实归属的工作表(TaskOut.filter_snapshot.table_id /
+    // Job.table_id)。进入任务视图时**自动把数据表选择器对齐到该表**:
+    // 表选择器永远是数据归属的真值,否则"选着表A看着表B的数据"是交互杂糅的根源
+    function viewTaskJobs(taskId, platform, tableId) {
       if (!taskId) return;
       query.task_id = taskId;
       if (platform) query.platform = platform;
+      if (tableId !== undefined && tableId !== null) query.table_id = tableId || 1;
       query.page = 1;
       showDetail.value = false;
       taskDetailVisible.value = false;
@@ -514,9 +538,10 @@ const app = createApp({
     // 右栏任务下拉(平台选择框后):v-model 直接绑 query.task_id
     function onTaskPick(tid) {
       if (tid) {
-        // 选中任务联动其所属平台,避免"任务A + 平台B"组合查出空结果
+        // 选中任务联动其所属平台与存入表,避免"任务A + 平台B/表C"组合的错位展示
         const t = taskOptions.value.find((x) => x.id === tid);
-        viewTaskJobs(tid, t && t.platform);
+        const snapTid = t && t.filter_snapshot ? t.filter_snapshot.table_id : undefined;
+        viewTaskJobs(tid, t && t.platform, snapTid);
       } else {
         clearTaskFilter();
       }
@@ -526,6 +551,13 @@ const app = createApp({
       query.page = 1;
       reloadJobs();
     }
+    // 任务视图横幅信息源:任务对象可能来自右栏下拉候选或左栏最近任务
+    const activeTask = computed(() => {
+      const tid = query.task_id;
+      if (!tid) return null;
+      return taskOptions.value.find((x) => x.id === tid)
+        || recentTasks.value.find((x) => x.id === tid) || null;
+    });
     // 右栏平台筛选变化时,任务候选跟随(空=全部平台的任务)
     watch(() => query.platform, () => loadTaskOptions());
 
@@ -757,7 +789,10 @@ const app = createApp({
       const r = await api(`/tables/${row.id}/clear`, { method: "POST", body: {} });
       ElMessage.success(`已清空 ${r.deleted} 条岗位`);
       loadTables();
-      if ((query.table_id || 1) === row.id) reloadJobs();
+      if ((query.table_id || 1) === row.id) {
+        query.task_id = null;   // 表已清空,任务过滤失去意义
+        reloadJobs();
+      }
     }
     async function delTable(row) {
       const n = row.job_count || 0;
@@ -770,9 +805,11 @@ const app = createApp({
       }
       await api(`/tables/${row.id}`, { method: "DELETE" });
       ElMessage.success("已删除" + (n ? `,清除岗位 ${n} 条` : "(空表)"));
-      // 删除的是当前选中的表:自动切回默认表并刷新列表
+      // 删除的是当前选中的表:自动切回默认表并刷新列表(同时退出任务视图:
+      // 任务归属的表已不存在,任务过滤失去意义)
       if ((query.table_id || 1) === row.id) {
         query.table_id = 1;
+        query.task_id = null;
         reloadJobs();
       }
       // 删除的是左栏"存入目标表":回退默认表(否则新抓数据写入不存在的表)
@@ -909,6 +946,8 @@ const app = createApp({
         if (t) {
           query.task_id = savedTask;
           if (t.platform !== query.platform) query.platform = t.platform;
+          // 与 viewTaskJobs 同一规则:任务视图下表选择器对齐任务存入表
+          query.table_id = (t.filter_snapshot ? t.filter_snapshot.table_id : null) || 1;
         } else {
           localStorage.removeItem(VIEW_TASK_KEY);
         }
@@ -929,7 +968,7 @@ const app = createApp({
     return {
       SearchIcon, RefreshIcon, LinkIcon, DeleteIcon, SettingIcon,
       platforms, gears, filters, tables, jobs, stats, recentTasks, events, eventsOpen,
-      taskOptions, taskMgrVisible,
+      taskOptions, taskMgrVisible, taskList, onTaskListScroll, activeTask,
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,

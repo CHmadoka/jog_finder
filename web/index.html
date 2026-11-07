@@ -247,6 +247,12 @@
     .counter .lbl { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
     /* ---------- 任务历史 ---------- */
+    .task-card { min-height: 0; }
+    /* 卡片内滚动区:标题固定,行区滚动(触底懒加载更早记录) */
+    .task-scroll {
+      flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable;
+      margin: 0 -6px; padding: 0 6px;
+    }
     .task-row {
       display: flex; align-items: center; gap: 8px; padding: 6px 6px; font-size: 12px;
       border-bottom: 1px dashed #eef0f6; cursor: pointer; border-radius: 6px;
@@ -259,6 +265,13 @@
     .task-row .plogo-sm { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
     .task-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
     .task-time { color: var(--text3); flex-shrink: 0; }
+    /* 任务视图横幅:琥珀色调 = "临时镜头"状态提示 */
+    .task-banner {
+      display: flex; align-items: center; gap: 10px;
+      background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+      padding: 6px 12px; margin-bottom: 10px; font-size: 12.5px; color: #92400e;
+    }
+    .task-banner .tb-text { flex: 1; min-width: 0; }
     .empty-tip { font-size: 12px; color: var(--text3); text-align: center; padding: 12px 0; }
 
     /* ---------- 右侧数据区 ---------- */
@@ -612,20 +625,25 @@
         <div class="empty-tip" v-else>暂无进行中的任务，配置好条件后点「开始抓取」</div>
       </div>
 
-      <!-- 最近任务:全平台混排(行首平台徽标标注归属),不被左栏当前平台过滤 -->
-      <div class="card" style="flex:1">
-        <div class="card-title">最近任务<span class="aux">全平台 · 点击查看详情</span></div>
-        <div class="task-row" v-for="t in recentTasks" :key="t.id" @click="showTaskDetail(t)">
-          <span class="plogo plogo-sm" :style="platformLogo(t.platform).img ? {} : { background: platformLogo(t.platform).color }">
-            <img v-if="platformLogo(t.platform).img" :src="platformLogo(t.platform).img"
-                 :srcset="platformLogo(t.platform).srcset" alt="" @error="onLogoError(t.platform)">
-            <template v-else>{{ platformLogo(t.platform).text }}</template>
-          </span>
-          <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status) }}</el-tag>
-          <span class="task-msg" :title="t.message">{{ t.message || '—' }}</span>
-          <span class="task-time">{{ t.status === 'done' || t.status === 'error' || t.status === 'stopped' ? fmtDate(t.finished_at || t.started_at) : '进行中' }}</span>
+      <!-- 最近任务:全平台混排(行首平台徽标),卡片内滚动、触底自动加载更早记录 -->
+      <div class="card task-card" style="flex:1; display:flex; flex-direction:column; min-height:0">
+        <div class="card-title">最近任务<span class="aux">全平台 · 下滚加载更早</span></div>
+        <div class="task-scroll" @scroll="onTaskListScroll">
+          <div class="task-row" v-for="t in recentTasks" :key="t.id" @click="showTaskDetail(t)">
+            <span class="plogo plogo-sm" :style="platformLogo(t.platform).img ? {} : { background: platformLogo(t.platform).color }">
+              <img v-if="platformLogo(t.platform).img" :src="platformLogo(t.platform).img"
+                   :srcset="platformLogo(t.platform).srcset" alt="" @error="onLogoError(t.platform)">
+              <template v-else>{{ platformLogo(t.platform).text }}</template>
+            </span>
+            <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status) }}</el-tag>
+            <span class="task-msg" :title="t.message">{{ t.message || '—' }}</span>
+            <span class="task-time">{{ t.status === 'done' || t.status === 'error' || t.status === 'stopped' ? fmtDate(t.finished_at || t.started_at) : '进行中' }}</span>
+          </div>
+          <div class="empty-tip" v-if="!recentTasks.length">暂无任务记录</div>
+          <div class="empty-tip" v-else-if="taskList.loading">加载中…</div>
+          <div class="empty-tip" v-else-if="taskList.done">已加载全部 {{ recentTasks.length }} 条</div>
+          <div class="empty-tip" v-else>继续下滚加载更早记录</div>
         </div>
-        <div class="empty-tip" v-if="!recentTasks.length">暂无任务记录</div>
       </div>
     </aside>
 
@@ -673,6 +691,16 @@
         <el-tooltip content="刷新列表与统计">
           <el-button :icon="RefreshIcon" circle @click="reloadJobs"></el-button>
         </el-tooltip>
+      </div>
+
+      <!-- 任务视图横幅:任务过滤是叠加在数据表上的"临时镜头",进入时已自动把
+           表选择器对齐到任务存入的表;切表或退出都会回到普通浏览 -->
+      <div class="task-banner" v-if="query.task_id">
+        <span class="tb-text">
+          任务视图 #{{ query.task_id }}<template v-if="activeTask"> · {{ (activeTask.keywords || '').split('|').join(' / ') }} @ {{ fmtCities(activeTask.city) }}</template>
+          —— 仅显示该任务的关联岗位;切换上方数据表或点右侧退出即回到普通浏览
+        </span>
+        <el-button size="small" text type="primary" @click="clearTaskFilter">退出任务视图</el-button>
       </div>
 
       <!-- 统计条 -->
@@ -809,7 +837,7 @@
         <el-descriptions-item label="来源任务" :span="2">
           <el-link v-if="currentJob.crawl_task_id" type="primary"
                    :title="'点击在右栏按任务 #' + currentJob.crawl_task_id + ' 过滤'"
-                   @click="viewTaskJobs(currentJob.crawl_task_id, currentJob.platform)">
+                   @click="viewTaskJobs(currentJob.crawl_task_id, currentJob.platform, currentJob.table_id)">
             任务 #{{ currentJob.crawl_task_id }}(点击查看该任务关联的全部岗位)
           </el-link>
           <span v-else style="color:var(--el-text-color-secondary)">—(早期数据或补全任务,无抓取任务记录)</span>
@@ -863,7 +891,7 @@
       <div class="block-title">条件快照</div>
       <div class="drawer-desc" style="font-family: Consolas, monospace; font-size: 12px;">{{ JSON.stringify(detailTask.filter_snapshot, null, 2) }}</div>
       <div style="margin-top:14px;">
-        <el-button type="primary" plain @click="viewTaskJobs(detailTask.id, detailTask.platform)">
+        <el-button type="primary" plain @click="viewTaskJobs(detailTask.id, detailTask.platform, detailTask.filter_snapshot ? detailTask.filter_snapshot.table_id : undefined)">
           查看关联岗位(在右栏按任务 #{{ detailTask.id }} 过滤)
         </el-button>
       </div>
