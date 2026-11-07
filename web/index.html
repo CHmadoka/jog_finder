@@ -315,20 +315,26 @@
       display: flex; align-items: center;
       letter-spacing: 1px; color: var(--el-text-color-secondary);
     }
-    /* 信息表格去网格化:无边框无底色,label 灰字,行间仅极淡横线(spec-sheet 风) */
-    .el-drawer .el-descriptions__body { background: transparent; }
-    .el-drawer .el-descriptions__table .el-descriptions__cell {
-      border: none !important;
-      border-bottom: 1px solid rgba(17, 31, 51, 0.05) !important;
-      padding: 9px 12px 9px 0;
+    /* 信息表格:保留表格形态并做精致——hairline 格线、圆角外框、
+       label 淡底、行悬停微亮(spec-sheet 卡片风) */
+    .el-drawer .el-descriptions__body {
+      border-radius: 10px;
+      border: 1px solid rgba(17, 31, 51, 0.08);
+      box-shadow: 0 1px 2px rgba(15, 39, 76, 0.04);
+      overflow: hidden;
     }
-    .el-drawer .el-descriptions__table tr:last-child .el-descriptions__cell {
-      border-bottom: none !important;
+    .el-drawer .el-descriptions__table .el-descriptions__cell {
+      border: 1px solid rgba(17, 31, 51, 0.055) !important;
+      padding: 10px 14px;
+    }
+    .el-drawer .el-descriptions__table tr:hover .el-descriptions__cell {
+      background: rgba(64, 158, 255, 0.035);
     }
     .el-drawer .el-descriptions__label.is-bordered-label {
-      background: transparent !important;
+      background: #f7f9fc !important;
       color: var(--el-text-color-secondary);
-      font-weight: 400;
+      font-weight: 500;
+      min-width: 88px;
     }
     /* 备注区:柔和 callout(仅左侧警示条,无边框) */
     .el-drawer .remark-box {
