@@ -48,7 +48,10 @@ Copy-Item .env.example .env          # 按需修改配置
 ## 使用流程
 
 **一键启动**:双击项目根目录的 **`启动.bat`** —— 自动检查服务是否在运行、按需初始化环境、
-以最小化窗口启动服务并自动打开 `http://127.0.0.1:8765`(关闭 job_finder-server 控制台窗口即停止服务)。
+弹出 job_finder-server 控制台窗口启动服务并自动打开 `http://127.0.0.1:8765`
+(关闭该控制台窗口即停止服务)。服务强制绑定**可见**控制台窗口:无控制台或隐藏窗口
+(如 `Start-Process -WindowStyle Hidden`)方式启动会被直接拒绝并记录到 `data/app.log`;
+确需无窗口后台运行,设置环境变量 `JOB_FINDER_HEADLESS=1`。
 
 也可以手动启动:
 
