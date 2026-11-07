@@ -100,7 +100,11 @@
     }
     /* 文字元素按基线对齐:平台名(13px)与空闲/进度(12px)、计数徽章(11px)共用
        一条基线,不再出现"平台文字偏低";圆点无文本基线,单独垂直居中 */
-    .ts-item { position: relative; display: flex; align-items: baseline; gap: 7px; max-width: 470px; }
+    .ts-item { position: relative; display: flex; align-items: baseline; gap: 7px; max-width: 470px;
+      /* 文字以中文字体为首并整段继承:默认栈 Arial 在前,拉丁 strut 与汉字回退雅黑的
+         ascent 度量差约 0.16em,文字盒在行盒中下沉(底贴边、顶空 2px),平台名
+         视觉中心比圆点低约 1px;实测统一后中心差归零,baseline 对齐体系不变 */
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
     .ts-item .dot { align-self: center; }
     .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
     .ts-idle { font-size: 12px; color: var(--text3); }
