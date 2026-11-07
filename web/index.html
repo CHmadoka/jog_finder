@@ -272,6 +272,11 @@
       background: #f7f8fc; border-radius: 8px; padding: 12px 14px;
       user-select: text; cursor: text;
     }
+    /* 描述内命中词条的高亮标记(淡黄底,与 Element 警告色一致) */
+    .drawer-desc mark {
+      background: #ffe58f; color: inherit; padding: 0 2px;
+      border-radius: 3px; font-weight: 600;
+    }
     /* 详情抽屉基础信息表格文本可选中复制 */
     .el-drawer .el-descriptions__body { user-select: text; cursor: text; }
     .block-title { font-size: 13px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; }
@@ -670,6 +675,8 @@
         <el-tag v-else type="info" effect="light">未分析</el-tag>
         <el-tag effect="plain">{{ platformOf(currentJob.platform) }}</el-tag>
         <el-tag v-if="currentJob.keyword" type="info" effect="plain">词条: {{ currentJob.keyword }}</el-tag>
+        <el-tag v-for="k in hitKeywords" :key="'hit-' + k" type="warning" effect="light"
+                title="该词条出现在本岗位标题或描述中">命中: {{ k }}</el-tag>
       </div>
       <el-descriptions :column="2" size="small" border>
         <el-descriptions-item label="公司">{{ currentJob.company }}</el-descriptions-item>
@@ -705,7 +712,9 @@
       </template>
       <el-text type="info" v-else>—</el-text>
       <div class="block-title">职位描述</div>
-      <div class="drawer-desc">{{ currentJob.description || '（未抓取到描述）' }}</div>
+      <div v-if="currentJob.description" class="drawer-desc"
+           v-html="highlightedDesc"></div>
+      <div v-else class="drawer-desc">（未抓取到描述）</div>
       <div style="margin-top:16px; display:flex; gap:10px;">
         <el-button type="primary" @click="openJob(currentJob)">在已登录浏览器打开</el-button>
         <el-button type="danger" plain @click="delJob(currentJob)">删除</el-button>

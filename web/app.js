@@ -272,6 +272,41 @@ const app = createApp({
       const w = (currentJob.value || {}).welfare || "";
       return w.split(/[,，;；、]+/).map((s) => s.trim()).filter(Boolean);
     });
+
+    // ---------- 词条高亮(浏览岗位详情) ----------
+    // 词条来源 = 岗位记录的 keyword(该任务全部搜索词条,顿号/竖线分隔)。
+    // 展示时动态扫描标题/描述文本命中情况——不依赖入库时新增字段,旧数据同样生效。
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function escapeReg(s) {
+      return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    const jobKeywords = computed(() => {
+      const raw = (currentJob.value || {}).keyword || "";
+      return [...new Set(raw.split(/[、,，|;；]+/).map((s) => s.trim()).filter(Boolean))];
+    });
+    // 命中词条:出现在标题或描述中的词条(标签展示;与描述内 <mark> 同源)
+    const hitKeywords = computed(() => {
+      const j = currentJob.value || {};
+      if (!jobKeywords.value.length) return [];
+      const hay = `${j.title || ""}\n${j.description || ""}`;
+      return jobKeywords.value.filter((k) => hay.includes(k));
+    });
+    // 描述高亮 HTML:整段先 HTML 转义(防 XSS),再按词条(长词优先,避免
+    // "文员"截胡"仓库文员")替换为 <mark>;仅替换在描述中实际出现的词条
+    const highlightedDesc = computed(() => {
+      const desc = (currentJob.value || {}).description || "";
+      if (!desc) return "";
+      const esc = escapeHtml(desc);
+      const parts = jobKeywords.value
+        .filter((k) => desc.includes(k))
+        .sort((a, b) => b.length - a.length)
+        .map((k) => escapeReg(escapeHtml(k)));
+      if (!parts.length) return esc;
+      return esc.replace(new RegExp(`(${parts.join("|")})`, "g"), "<mark>$1</mark>");
+    });
     // 异常面板为悬浮二级卡片:点击面板与唤起按钮以外的空白处即收起
     function onDocClick(ev) {
       if (!eventsOpen.value) return;
@@ -848,6 +883,7 @@ const app = createApp({
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,
+      jobKeywords, hitKeywords, highlightedDesc,
       comboHover, comboCur,
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
