@@ -22,7 +22,10 @@ def list_filters(platform: str | None = None, db: Session = Depends(get_session)
 def create_filter(body: SearchFilterIn, db: Session = Depends(get_session)):
     if body.platform not in PLATFORMS:
         raise HTTPException(400, f"platform 必须是 {PLATFORMS}")
-    if body.gear_id and not db.get(Gear, body.gear_id):
+    # 词条只来自岗位设置,未关联设置的条件无法启动抓取
+    if not body.gear_id:
+        raise HTTPException(400, "请选择岗位设置")
+    if not db.get(Gear, body.gear_id):
         raise HTTPException(400, "关联档位不存在")
     flt = SearchFilter(**body.model_dump())
     db.add(flt)
@@ -38,6 +41,10 @@ def update_filter(filter_id: int, body: SearchFilterIn, db: Session = Depends(ge
         raise HTTPException(404, "条件不存在")
     if body.platform not in PLATFORMS:
         raise HTTPException(400, f"platform 必须是 {PLATFORMS}")
+    if not body.gear_id:
+        raise HTTPException(400, "请选择岗位设置")
+    if not db.get(Gear, body.gear_id):
+        raise HTTPException(400, "关联档位不存在")
     for k, v in body.model_dump().items():
         setattr(flt, k, v)
     db.commit()

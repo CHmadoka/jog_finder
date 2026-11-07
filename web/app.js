@@ -123,11 +123,9 @@ const app = createApp({
       filter_id: null,
       gear_id: null,
       cities: [],               // 多选城市(省市级联选择;空 = 全国)
-      keyword: "",
       salary_min: "",           // 薪资范围下限(K/月,可缺省)
       salary_max: "",           // 薪资范围上限(K/月,可缺省)
       max_pages: 10,
-      all_keywords: true,
       table_id: 1,              // 抓取结果存入的数据表
     });
 
@@ -151,7 +149,7 @@ const app = createApp({
     const eventsOpen = ref(false);
     const gearForm = reactive({ id: null, name: "", keywords: [] });
     const filterForm = reactive({
-      id: null, platform: "boss", name: "", cities: [], gear_id: null, keyword: "",
+      id: null, platform: "boss", name: "", cities: [], gear_id: null,
       salary_min: "", salary_max: "",
       industries_avoid: [], industries_prefer: [],
     });
@@ -170,12 +168,12 @@ const app = createApp({
 
     const canStart = computed(() => {
       if (grab.mode === "saved") return !!grab.filter_id;
-      return !!(grab.gear_id || (grab.keyword || "").trim());
+      return !!grab.gear_id;
     });
     const startHint = computed(() => {
       if (canStart.value) return "";
       if (grab.mode === "saved") return "请先选择一个已存条件";
-      return "请先选择岗位设置,或填写限定词条";
+      return "请先选择岗位设置";
     });
     // 表头排序指示器的受控状态(与 query.sort_by/sort_order 同步)
     const SORT_PROP = { updated: "updated_at", published: "published_at", hr_active: "hr_active_at", city: "city", exp_edu: "experience" };
@@ -588,8 +586,6 @@ const app = createApp({
               ...base,
               gear_id: grab.gear_id || null,
               cities: grab.cities,          // 多选城市(空 = 全国)
-              keyword: grab.keyword.trim() || null,
-              all_keywords: grab.all_keywords,
             };
         await api("/tasks/start", { method: "POST", body });
         ElMessage.success(`任务已启动,结果存入「${currentTableName.value}」`);
@@ -662,7 +658,6 @@ const app = createApp({
       filterForm.name = `${platformOf(grab.platform)}-${grab.cities.length ? grab.cities.join("_") : "全国"}`;
       filterForm.cities = [...grab.cities];
       filterForm.gear_id = grab.gear_id || null;
-      filterForm.keyword = grab.keyword.trim();
       const [smin, smax] = (grab.salary_min.trim() || grab.salary_max.trim())
         ? [grab.salary_min.trim(), grab.salary_max.trim()] : ["", ""];
       filterForm.salary_min = smin;
@@ -677,7 +672,6 @@ const app = createApp({
       // 城市串(逗号分隔,兼容旧单值)→ 标签数组
       filterForm.cities = (row.city || "").split(",").map((s) => s.trim()).filter(Boolean);
       filterForm.gear_id = row.gear_id || null;
-      filterForm.keyword = row.keyword || "";
       const [smin, smax] = (row.extras.salary || "").split(",");
       filterForm.salary_min = smin || "";
       filterForm.salary_max = smax || "";
@@ -691,6 +685,8 @@ const app = createApp({
     }
     async function saveFilter() {
       if (!filterForm.name.trim()) return ElMessage.warning("请填写条件名");
+      // 词条只能来自岗位设置,所以条件必须关联设置(否则启动抓取会因无词条失败)
+      if (!filterForm.gear_id) return ElMessage.warning("请选择岗位设置");
       const salary = composeSalary(filterForm.salary_min, filterForm.salary_max);
       if (salary === "INVALID") {
         ElMessage.warning("薪资范围请填写数字(K/月),单边可留空");
@@ -701,7 +697,6 @@ const app = createApp({
         name: filterForm.name.trim(),
         city: filterForm.cities.join(","),   // 多选城市存逗号分隔串(兼容旧单值格式)
         gear_id: filterForm.gear_id,
-        keyword: filterForm.keyword.trim(),
         extras: {
           salary: salary || "",
           industries_avoid: filterForm.industries_avoid,

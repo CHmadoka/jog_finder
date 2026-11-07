@@ -50,7 +50,6 @@ class SearchFilter(Base):
     name = Column(String(100), nullable=False, default="默认条件")
     city = Column(String(50), default="", comment="城市")
     gear_id = Column(Integer, nullable=True, comment="关联档位")
-    keyword = Column(String(200), default="", comment="直接搜索词(优先于档位词条)")
     extras = Column(JSON, default=dict, comment="平台附加参数(经验/学历/薪资范围等)")
     created_at = Column(DateTime, default=now_local)
 

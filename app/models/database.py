@@ -60,6 +60,13 @@ _NEW_COLUMNS = {
 DEFAULT_TABLE = (1, "默认表", "default")
 
 
+# 一次性删除的列:表 → 列名列表。SQLite 3.35+ 支持 DROP COLUMN。
+# search_filter.keyword(限定词条)功能已整体移除。
+_DROP_COLUMNS = {
+    "search_filter": ["keyword"],
+}
+
+
 def _lcs_len(a: str, b: str) -> int:
     """最长公共连续子串长度(小文本启发式,用于词条-标题关联度)。"""
     if not a or not b:
@@ -111,6 +118,14 @@ def _migrate_columns() -> None:
             for name, ddl in cols:
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+        # 功能移除后清理废弃列(幂等:不存在则跳过)
+        for table, names in _DROP_COLUMNS.items():
+            if table not in inspector.get_table_names():
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for name in names:
+                if name in existing:
+                    conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {name}"))
         # 旧 hr_active_at 曾以 ISO 微秒格式存储(datetime 列),统一规范到分钟级(幂等)
         conn.execute(text(
             "UPDATE job SET hr_active_at = substr(hr_active_at, 1, 16) "

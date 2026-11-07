@@ -27,7 +27,7 @@ class AlreadyRunning(Exception):
 
 
 # ---------- 独立的同步 DB 帮助函数(供 to_thread 调用) ----------
-def _db_load_condition(filter_id: int, platform: str) -> tuple[str, list, str, str, dict]:
+def _db_load_condition(filter_id: int, platform: str) -> tuple[str, list, str, dict]:
     with SessionLocal() as db:
         flt = db.get(SearchFilter, filter_id)
         if not flt:
@@ -39,7 +39,6 @@ def _db_load_condition(filter_id: int, platform: str) -> tuple[str, list, str, s
             gear.name if gear else "",
             list(gear.keywords) if gear else [],
             flt.city or "",
-            flt.keyword or "",
             dict(flt.extras or {}),
         )
 
@@ -391,18 +390,15 @@ class Scheduler:
         *,
         filter_id: int | None = None,
         gear_id: int | None = None,
-        keyword: str | None = None,
         city: str | None = None,
         cities: list[str] | None = None,
         salary: str | None = None,
         table_id: int | None = None,
         max_pages: int | None = None,
-        all_keywords: bool = True,
     ) -> int:
         """启动抓取任务。
 
-        条件来源优先级:filter_id(已存条件) > gear_id(直选档位) > keyword(临时词)。
-        all_keywords=True 时跑档位的全部词条(对齐实例的多关键词批量采集)。
+        条件来源优先级:filter_id(已存条件) > gear_id(直选档位)。
         cities: 城市列表(多选,空=全国);city 为旧单值参数(兼容),cities 优先。
         salary: 薪资范围原文(如 "10-20" / "10," / ",20",单位K/月,单边可缺省)。
         table_id: 新岗位存入的目标数据表(空=默认表)。
@@ -412,9 +408,9 @@ class Scheduler:
 
         plat = get_platform(platform)
         # 解析条件
-        gear_name, gear_keywords, f_city, f_kw, extras = "", [], "", "", {}
+        gear_name, gear_keywords, f_city, extras = "", [], "", {}
         if filter_id:
-            gear_name, gear_keywords, f_city, f_kw, extras = await asyncio.to_thread(
+            gear_name, gear_keywords, f_city, extras = await asyncio.to_thread(
                 _db_load_condition, filter_id, platform
             )
         elif gear_id:
@@ -433,13 +429,10 @@ class Scheduler:
                 + (f"。当前支持: {'、'.join(sorted(supported))}" if supported else "")
             )
 
-        # 关键词列表:显式 keyword 优先(单词条);否则用档位全部/首个词条
-        if keyword:
-            kw_list = [keyword]
-        elif gear_keywords:
-            kw_list = list(gear_keywords) if all_keywords else [gear_keywords[0]]
-        else:
-            raise ValueError("缺少搜索关键词(未选择档位/条件且未提供 keyword)")
+        # 关键词列表:档位的全部词条(没有词条则无从检索)
+        if not gear_keywords:
+            raise ValueError("所选岗位设置没有词条,请先在「岗位设置」中添加")
+        kw_list = list(gear_keywords)
 
         # 薪资范围:显式传入优先,其次已存条件 extras.salary;存原文,仅比较时解析
         sal_raw = (salary or "").strip() or str(extras.get("salary") or "").strip()

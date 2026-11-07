@@ -27,7 +27,6 @@ class SearchFilterIn(BaseModel):
     name: str = "默认条件"
     city: str = ""
     gear_id: Optional[int] = None
-    keyword: str = ""
     extras: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -126,5 +125,4 @@ class StartTaskIn(BaseModel):
     platform: str
     filter_id: Optional[int] = None
     max_pages: Optional[int] = None
-    keyword: Optional[str] = None
     city: Optional[str] = None
