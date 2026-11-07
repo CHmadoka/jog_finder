@@ -2,7 +2,7 @@
  *
  * 设计原则:
  * 1. 抓取(左栏)与数据浏览(右栏)完全解耦:左栏平台只决定"往哪抓",右栏筛选只决定"看什么"。
- * 2. 快速抓取 / 已存条件双模式,所选条件实时展示摘要,避免"黑盒启动"。
+ * 2. 快速抓取 / 已存条件双模式(两者管理入口统一为组合框内齿轮按钮)。
  * 3. 启动前置校验:条件不完整时按钮禁用并给出明确原因。
  */
 const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vue;
@@ -116,7 +116,6 @@ const app = createApp({
     const taskList = reactive({ limit: 5, loading: false, done: false });
     const taskOptions = ref([]);      // 左栏任务选择框候选(当前平台最近30条)
     const taskMgrVisible = ref(false);
-    const healthText = ref("检测连接...");
     const loading = ref(false);
     const starting = ref(false);
 
@@ -162,9 +161,6 @@ const app = createApp({
     let timer = null;
 
     // ---------- 计算属性 ----------
-    const selectedFilter = computed(
-      () => filters.value.find((f) => f.id === grab.filter_id) || null
-    );
     const currentStatus = computed(() => statuses[grab.platform] || {});
     const running = computed(() => !!currentStatus.value.running);
 
@@ -730,11 +726,6 @@ const app = createApp({
       filterForm.industries_avoid = [...(row.extras.industries_avoid || [])];
       filterForm.industries_prefer = [...(row.extras.industries_prefer || [])];
     }
-    function editSelectedFilter() {
-      if (!selectedFilter.value) return;
-      editFilter(selectedFilter.value);
-      filterVisible.value = true;
-    }
     async function saveFilter() {
       if (!filterForm.name.trim()) return ElMessage.warning("请填写条件名");
       // 词条只能来自岗位设置,所以条件必须关联设置(否则启动抓取会因无词条失败)
@@ -931,12 +922,6 @@ const app = createApp({
     watch(currentJob, (v) => { if (v) showDetail.value = true; });
 
     onMounted(async () => {
-      try {
-        await api("/health");
-        healthText.value = "规则备注已启用";
-      } catch (e) {
-        healthText.value = "后端未连接";
-      }
       await loadPlatforms();
       // 恢复右栏浏览平台(独立记忆;非法值忽略,空=全部平台)
       const viewPlat = localStorage.getItem(VIEW_PLATFORM_KEY) || "";
@@ -987,13 +972,13 @@ const app = createApp({
       SearchIcon, RefreshIcon, LinkIcon, DeleteIcon, SettingIcon,
       platforms, gears, filters, tables, jobs, stats, recentTasks, events, eventsOpen,
       taskOptions, taskMgrVisible, taskList, onTaskListScroll, activeTask,
-      grab, query, statuses, healthText, loading, starting,
+      grab, query, statuses, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,
       jobKeywords, hitKeywords, highlightedDesc, highlightedTitle,
       comboHover,
       gearForm, filterForm, tableForm,
-      selectedFilter, currentStatus, running, canStart, startHint,
+      currentStatus, running, canStart, startHint,
       sortState, skipTipOf, currentTableName,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       kwCount, cityLabel, runningPlatforms,
@@ -1004,7 +989,7 @@ const app = createApp({
       loadJobs,
       onSortChange, toggleSortOrder, onTableChange,
       openGearDialog, resetGearForm, editGear, createGear, saveGear, delGear,
-      openFilterDialog, resetFilterForm, editFilter, editSelectedFilter, saveFilter, delFilter,
+      openFilterDialog, resetFilterForm, editFilter, saveFilter, delFilter,
       openTableDialog, resetTableForm, editTable, createTable, saveTable, clearTable, delTable,
       openDetail, openJob, delJob, exportJobs, onMenu,
     };

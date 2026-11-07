@@ -57,8 +57,23 @@
       background: linear-gradient(135deg, #4c6ef5, #7c5cf5);
       display: flex; align-items: center; justify-content: center;
     }
-    .brand .sub { font-size: 12px; font-weight: 400; color: var(--text3); }
     .topbar .spacer { flex: 1; }
+
+    /* ---------- 顶栏平台切换:纯圆角徽标按钮 ---------- */
+    /* 品牌与平台按钮之间的竖线分隔 */
+    .topbar-divider { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
+    .top-plats { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    /* 按钮本体就是圆角徽标(30px,尺寸与 .plogo / gen_logos.py 的 CSS_SIZE 绑定不可改):
+       用 transform 放大(不参与布局,不推挤邻元素),悬停放大、选中保持放大 */
+    .top-plat {
+      position: relative; cursor: pointer; border-radius: 8px;
+      transition: transform .15s; user-select: none;
+    }
+    .top-plat:hover, .top-plat.active { transform: scale(1.15); }
+    /* 最近任务结果临时状态:完成→绿环,异常→红环(运行中指示灯绿点优先覆盖);
+       纯图标按钮上用外圈阴影环(原 inset 描边会被整幅徽标图片盖住) */
+    .top-plat.st-done { box-shadow: 0 0 0 1.5px #22c55e; }
+    .top-plat.st-error { box-shadow: 0 0 0 1.5px #dc2626; }
 
     /* ---------- 顶部中心状态区(任一平台运行时显示,全空闲隐藏) ---------- */
     .top-status {
@@ -116,22 +131,8 @@
     .side .card-title { margin-bottom: 8px; }
     .side .field-label { margin: 7px 0 3px; }
 
-    /* ---------- 平台选择 ---------- */
-    .platform-switch { display: flex; gap: 8px; }
-    .psw-item {
-      flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 6px 4px;
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      text-align: center; cursor: pointer; font-size: 13px; color: var(--text2);
-      transition: border-color .15s, background-color .15s, color .15s;
-      position: relative; user-select: none;
-    }
-    .psw-item:hover { border-color: var(--el-color-primary-light-5); color: var(--text); }
-    .psw-item.active {
-      border-color: var(--el-color-primary); color: var(--el-color-primary);
-      background: var(--el-color-primary-light-9);
-      /* 不变字重:避免选中时文字加粗引起宽度变化/抖动 */
-    }
-    /* 平台徽标:官方应用图标(本地 PNG,1x/2x/3x 三档);img 缺失/加载失败回退品牌色文字块。
+    /* ---------- 平台徽标(顶栏切换按钮 + 任务行小徽标共用) ---------- */
+    /* 官方应用图标(本地 PNG,1x/2x/3x 三档);img 缺失/加载失败回退品牌色文字块。
        尺寸须与 scripts/gen_logos.py 的 CSS_SIZE 一致,换尺寸要重跑脚本 */
     .plogo {
       width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
@@ -140,17 +141,14 @@
       line-height: 1; overflow: hidden;
     }
     .plogo img { width: 100%; height: 100%; object-fit: contain; display: block; }
-    .psw-item .badge {
+    /* 徽标右上角指示灯:运行绿 / 空闲灰 / 最近任务异常红 */
+    .top-plat .badge {
       position: absolute; top: -5px; right: -5px; width: 9px; height: 9px; border-radius: 50%;
       border: 2px solid #fff;
     }
     .badge.on { background: #22c55e; }
     .badge.off { background: #cbd2dc; }
     .badge.err { background: #dc2626; }
-    /* 最近任务结果的临时状态:完成→绿边框,异常→红边框(新任务启动即覆盖)。
-       定义在 .active 之后:结果状态边框优先于选中态展示 */
-    .psw-item.st-done { border-color: #22c55e; box-shadow: inset 0 0 0 1px #22c55e; }
-    .psw-item.st-error { border-color: #dc2626; box-shadow: inset 0 0 0 1px #dc2626; }
 
     /* ---------- 模式切换 ---------- */
     .seg { display: flex; background: #eef0f6; border-radius: 8px; padding: 3px; gap: 3px; }
@@ -165,22 +163,9 @@
     .link { color: var(--el-color-primary); cursor: pointer; font-size: 12px; }
     .link:hover { text-decoration: underline; }
 
-    /* ---------- 已存条件摘要 ---------- */
-    /* 恒定占位(84px,与快速模式城市标签区等高):无条件/未选时显示占位文案 */
-    .cond-summary {
-      background: #f7f8fc; border: 1px solid var(--border); border-radius: 8px;
-      padding: 8px 10px; margin-top: 0; font-size: 12px; color: var(--text2); line-height: 1.9;
-      height: 84px; overflow-y: auto; scrollbar-gutter: stable;
-    }
-    .cond-summary .cs-k { color: var(--text3); display: inline-block; width: 44px; }
-    .cond-summary .el-tag { margin-right: 4px; }
-
     /* 抓取按钮外层(tooltip 触发载体 + 上边距):禁用按钮本身不冒泡鼠标事件 */
     .grab-btn-wrap { display: block; width: 100%; margin-top: 10px; }
     .grab-btn-wrap .el-button { width: 100%; margin-top: 0; }
-    /* 两种抓取模式统一固定高度的内容区:切换模式卡片高度不变,
-       最近任务卡片(贴底)上方间距稳定。高度 = label+控件 × 3 组 + 城市/摘要区 84~85 + 余量 */
-    .grab-mode-area { height: 232px; overflow: hidden; }
     /* 城市选择器(CityPicker):级联选择在上、已选标签区在下且恒定 52px,
        空态占位文案 —— 组件总高恒定 */
     .city-editor { display: block; padding: 2px 8px 3px; }
@@ -293,9 +278,9 @@
     .combo-line.is-done .c-mark { color: var(--el-color-success); }
 
     /* ---------- 任务历史 ---------- */
-    /* 卡片固定:不参与左栏 flex 拉伸,margin-top:auto 把卡片推到左栏底部贴边
-       (空间不足时随左栏整体滚动,依然完整可见) */
-    .task-card { display: flex; flex-direction: column; flex: none; margin-top: auto; }
+    /* 紧随「发起抓取」卡片之后(左栏顶部堆叠,由 .side 的 flex gap 8px 分隔):
+       顶部贴住抓取卡底部,不参与左栏 flex 拉伸 */
+    .task-card { display: flex; flex-direction: column; flex: none; }
     /* 行高锁定 36px(含 1px 分隔线,内容垂直居中):5 行 = 180px 数学恒等,
        不依赖 el-tag 的实际渲染高度 */
     .task-scroll {
@@ -510,7 +495,23 @@
     <div class="brand">
       <span class="logo">J</span>
       <span>JobFinder</span>
-      <span class="sub">已登录浏览器自动抓取岗位 · {{ healthText }}</span>
+    </div>
+    <!-- 品牌与平台切换之间的竖线分隔 -->
+    <span class="topbar-divider"></span>
+    <!-- 平台切换:纯圆角徽标按钮(无文字,名称见悬停提示),悬停放大、选中保持放大;
+         右上角指示灯 = 运行绿 / 空闲灰 / 最近任务异常红 -->
+    <div class="top-plats">
+      <div v-for="p in platforms" :key="p.id" class="top-plat" :title="p.name"
+           :class="{ active: grab.platform === p.id,
+                     'st-done': taskStatusOf(p.id) === 'done',
+                     'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
+        <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
+        <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
+          <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img"
+               :srcset="platformLogo(p.id).srcset" alt="" @error="onLogoError(p.id)">
+          <template v-else>{{ platformLogo(p.id).text }}</template>
+        </span>
+      </div>
     </div>
 
     <!-- 顶部中心状态区:任一平台运行时显示(每平台一段:圆点+名称+进度+计数),
@@ -561,23 +562,8 @@
       <div class="card">
         <div class="card-title">发起抓取</div>
 
-        <div class="platform-switch">
-          <div v-for="p in platforms" :key="p.id" class="psw-item"
-               :class="{ active: grab.platform === p.id,
-                         'st-done': taskStatusOf(p.id) === 'done',
-                         'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
-            <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
-            <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
-              <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img"
-                   :srcset="platformLogo(p.id).srcset" alt="" @error="onLogoError(p.id)">
-              <template v-else>{{ platformLogo(p.id).text }}</template>
-            </span>
-            {{ p.name }}
-          </div>
-        </div>
-
         <!-- 存入目标表:抓取结果固定写入该表,与右栏浏览的工作表筛选分离 -->
-        <div class="field-label" style="margin-top:8px;">存入数据表</div>
+        <div class="field-label">存入数据表</div>
         <div class="table-combo" style="width:100%">
           <el-select v-model="grab.table_id" style="flex:1; min-width:0">
             <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
@@ -592,9 +578,9 @@
           <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
         </div>
 
-        <!-- 两种模式共用固定高度的内容区:切换模式时卡片高度不变,
-             最近任务卡片(margin-top:auto 贴底)上方间距稳定 -->
-        <div class="grab-mode-area" v-if="grab.mode === 'quick'">
+        <!-- 模式内容区按内容自适应高度(原固定 232px 是为贴底任务卡保持间距,
+             任务卡改紧随抓取卡后不再需要;标签区仍各自限高内部滚动) -->
+        <template v-if="grab.mode === 'quick'">
           <div class="field-label">岗位设置</div>
           <div class="table-combo" style="width:100%">
             <el-select v-model="grab.gear_id" placeholder="选择设置" filterable
@@ -615,38 +601,18 @@
 
           <div class="field-label">每词条最多翻页数</div>
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
-        </div>
+        </template>
 
-        <!-- 已存条件 -->
+        <!-- 已存条件:管理入口与快速抓取的岗位设置一致(组合框内齿轮按钮) -->
         <template v-else>
-          <div class="field-label">
-            选择条件
-            <span class="link" @click="openFilterDialog">管理条件</span>
-          </div>
-          <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="width:100%">
-            <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name"></el-option>
-          </el-select>
-          <!-- 条件摘要区恒定占位(与快速模式的城市标签区等高):无条件/未选时显示占位文案,
-               切换模式/选择条件不再引起卡片高度波动 -->
-          <div class="cond-summary">
-            <template v-if="selectedFilter">
-              <div><span class="cs-k">城市</span>{{ fmtCities(selectedFilter.city) }}</div>
-              <div><span class="cs-k">设置</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联设置' }}</div>
-              <div><span class="cs-k">薪资</span>{{ fmtSalaryRange(selectedFilter.extras.salary) }}</div>
-              <div v-if="(selectedFilter.extras.industries_avoid || []).length">
-                <span class="cs-k">避开</span>
-                <el-tag v-for="k in selectedFilter.extras.industries_avoid" :key="k" size="small" type="danger" effect="plain">{{ k }}</el-tag>
-              </div>
-              <div v-if="(selectedFilter.extras.industries_prefer || []).length">
-                <span class="cs-k">优先</span>
-                <el-tag v-for="k in selectedFilter.extras.industries_prefer" :key="k" size="small" type="success" effect="plain">{{ k }}</el-tag>
-              </div>
-              <div><span class="cs-k">页数</span>每词条 {{ grab.max_pages }} 页</div>
-              <div style="margin-top:4px;">
-                <span class="link" @click="editSelectedFilter">编辑此条件</span>
-              </div>
-            </template>
-            <span v-else class="tags-empty">{{ filters.length ? '尚未选择条件' : '当前平台暂无已存条件，点右上角「管理与工具→筛选条件管理」创建' }}</span>
+          <div class="field-label">选择条件</div>
+          <div class="table-combo" style="width:100%">
+            <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="flex:1; min-width:0">
+              <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name"></el-option>
+            </el-select>
+            <el-tooltip content="管理筛选条件(新建 / 编辑 / 删除)" placement="top">
+              <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openFilterDialog"></el-button>
+            </el-tooltip>
           </div>
           <div class="field-label">每词条最多翻页数</div>
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
