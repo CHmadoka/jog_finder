@@ -383,13 +383,14 @@ const app = createApp({
     const highlightedDesc = computed(() => highlightText((currentJob.value || {}).description));
     // 标题高亮:入库匹配规则同样看标题,标题一并高亮
     const highlightedTitle = computed(() => highlightText((currentJob.value || {}).title));
-    // 异常面板收起规则:仅唤起胶囊与面板内的可交互内容(异常行/头部按钮)豁免;
-    // 面板自身的边距与空白区域(头部标题行空白、body 两侧留白)视同面板外,点击即收起
+    // 异常面板收起:仅唤起胶囊豁免(它自身负责开/关切换);矩形面板内部不再
+    // 豁免——内部任意点击(异常行/按钮/边距空白)都会收起,其上的交互动作
+    // 照常触发:capture 阶段先置收起,元素在本轮事件派发中仍在 DOM,冒泡阶段
+    // 的行跳转/按钮处理器不受影响
     function onDocClick(ev) {
       if (!eventsOpen.value) return;
       const t = ev.target;
-      if (t.closest && (t.closest(".event-fab") || t.closest(".ep-row")
-        || t.closest(".ep-head .el-button"))) return;
+      if (t.closest && t.closest(".event-fab")) return;
       eventsOpen.value = false;
     }
 

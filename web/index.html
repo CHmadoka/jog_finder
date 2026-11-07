@@ -130,9 +130,11 @@
       /* 状态卡定居顶栏中心后左栏收窄(396→376→356)让位右侧表格;
          与右栏间隔 = 右 padding 6 + main 左 padding 2 = 8px(与 .side 卡片间 8px 节奏一致) */
       width: 356px; flex-shrink: 0; padding: 10px 6px 10px 12px;
-      /* 滚动条常驻:内容高度随平台/任务状态变化(如「最近任务」卡片空/非空差 8px),
-         若用 auto,高度恰在临界点时滚动条会忽隐忽现,内容区宽度跳 15px,卡片看起来"变宽" */
-      overflow-y: scroll; scrollbar-gutter: stable;
+      /* 滚动条按需出现:scrollbar-gutter: stable 恒定预留轨道宽度,内容增减
+         不会引起卡片宽度跳动;不能用 overflow-y: scroll 强制常驻 —— 最近任务卡
+         已改 flex 撑满、左栏常态不溢出,强制渲染的空轨道是条"死区",点击(如
+         最近任务右侧边距处)会被浏览器吞掉不产生 click,异常面板收不起来 */
+      overflow-y: auto; scrollbar-gutter: stable;
       display: flex; flex-direction: column; gap: 8px;
     }
     /* 右栏边距与左栏一致(上/右/下 10/12;左 2px 与 side 右 padding 6 合计 8px 间隔,
