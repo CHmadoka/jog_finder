@@ -293,6 +293,17 @@ const app = createApp({
     function taskTagType(s) {
       return { done: "success", running: "primary", stopped: "warning", error: "danger" }[s] || "info";
     }
+    // 结束任务行的结构化标签数据:m词条 / n城市(空=全国) / a/b入库
+    function kwCount(t) {
+      return (t.keywords || "").split("|").filter((x) => x.trim()).length;
+    }
+    function cityCount(t) {
+      return (t.city || "").split(",").map((x) => x.trim()).filter(Boolean).length;
+    }
+    function cityLabel(t) {
+      const n = cityCount(t);
+      return n ? n + "城市" : "全国";
+    }
     function taskText(s) {
       return { done: "完成", running: "进行中", stopped: "已停止", error: "失败" }[s] || s;
     }
@@ -989,6 +1000,8 @@ const app = createApp({
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
+      kwCount, cityLabel,
+      kwCount, cityLabel,
       platformLogo, onLogoError,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,

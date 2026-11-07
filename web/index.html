@@ -257,10 +257,13 @@
     .counter .lbl { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
     /* ---------- 任务历史 ---------- */
-    .task-card { min-height: 0; }
-    /* 卡片内滚动区:标题固定,行区滚动(触底懒加载更早记录) */
+    /* 卡片固定高度(标题 + 恰好 5 行任务行):不参与左栏 flex 拉伸,
+       左栏内容(城市/词条/条件摘要)再多也不影响它 */
+    .task-card { display: flex; flex-direction: column; flex: none; }
+    /* 恰好 5 行:tag 24px + 行 padding 12px = 36px/行,前 4 行另有 1px 虚线分隔
+       → 4×37 + 36 = 184px;内容超出在行区内部滚动 */
     .task-scroll {
-      flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable;
+      flex: none; height: 184px; overflow-y: auto; scrollbar-gutter: stable;
       margin: 0 -6px; padding: 0 6px;
     }
     .task-row {
@@ -276,6 +279,13 @@
     .task-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
     .task-time { color: var(--text3); flex-shrink: 0; }
     .task-no { color: var(--text3); font-family: Consolas, monospace; flex-shrink: 0; font-size: 11.5px; }
+    /* 结束任务行的结构化小标签:m词条 / n城市 / a/b入库 */
+    .task-stats { flex: 1; min-width: 0; display: flex; gap: 4px; overflow: hidden; }
+    .stat-tag {
+      flex-shrink: 0; padding: 0 5px; border-radius: 4px; font-size: 11px;
+      line-height: 18px; background: #eef2f7; color: #5a6472; white-space: nowrap;
+    }
+    .stat-tag.save { background: #e7f7ee; color: #16803c; }
     /* 任务视图横幅:琥珀色调 = "临时镜头"状态提示 */
     .task-banner {
       display: flex; align-items: center; gap: 10px;
@@ -638,8 +648,9 @@
         <div class="empty-tip" v-else>暂无进行中的任务，配置好条件后点「开始抓取」</div>
       </div>
 
-      <!-- 最近任务:全平台混排(行首平台徽标),卡片内滚动、触底自动加载更早记录 -->
-      <div class="card task-card" style="flex:1; display:flex; flex-direction:column; min-height:0">
+      <!-- 最近任务:全平台混排(行首平台徽标),固定 5 行高度、行区独立滚动、
+           触底自动加载更早记录——高度不随左栏内容变化 -->
+      <div class="card task-card">
         <div class="card-title">最近任务<span class="aux">全平台 · 下滚加载更早</span></div>
         <div class="task-scroll" @scroll="onTaskListScroll">
           <div class="task-row" v-for="t in recentTasks" :key="t.id" @click="showTaskDetail(t)">
@@ -650,7 +661,13 @@
               <template v-else>{{ platformLogo(t.platform).text }}</template>
             </span>
             <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status) }}</el-tag>
-            <span class="task-msg" :title="t.message">{{ t.message || '—' }}</span>
+            <!-- 结束的任务:结构化小标签(词条/城市/入库占比);运行中:进度文本 -->
+            <span class="task-stats" v-if="t.status !== 'running'" :title="t.message">
+              <span class="stat-tag">{{ kwCount(t) }}词条</span>
+              <span class="stat-tag">{{ cityLabel(t) }}</span>
+              <span class="stat-tag save">{{ t.saved }}/{{ t.found }}入库</span>
+            </span>
+            <span class="task-msg" v-else :title="t.message">{{ t.message || '抓取中…' }}</span>
             <span class="task-time">{{ t.status === 'done' || t.status === 'error' || t.status === 'stopped' ? fmtDate(t.finished_at || t.started_at) : '进行中' }}</span>
           </div>
           <div class="empty-tip" v-if="!recentTasks.length">暂无任务记录</div>
