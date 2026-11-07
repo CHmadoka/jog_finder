@@ -277,20 +277,8 @@
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 600;
     }
-    /* 抽屉标题(标题词条同样高亮)+ 左侧渐变竖条强调 */
-    .drawer-title {
-      display: inline-block;
-      position: relative;
-      padding-left: 11px;
-      font-size: 16px; font-weight: 600; line-height: 1.5; word-break: break-all;
-    }
-    .drawer-title::before {
-      content: "";
-      position: absolute;
-      left: 0; top: 4px; bottom: 2px;
-      width: 4px; border-radius: 2px;
-      background: linear-gradient(180deg, var(--el-color-primary), var(--el-color-primary-light-5));
-    }
+    /* 抽屉标题(词条高亮保留,无装饰前缀,靠字号字重分层) */
+    .drawer-title { font-size: 17px; font-weight: 600; line-height: 1.6; word-break: break-all; letter-spacing: .2px; }
     .drawer-title mark {
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 700;
@@ -298,79 +286,64 @@
     /* header 区(标题+置顶操作按钮):占满左侧,不随内容滚动 */
     .drawer-head { flex: 1; min-width: 0; }
     .drawer-actions { margin-top: 8px; display: flex; gap: 10px; }
-    /* ===== 岗位详情抽屉整体美化(限定 .el-drawer 作用域,不影响弹窗) ===== */
-    /* header:淡主题色渐变底,底部为 2px 主题色渐变强调线(现代感,高可见) */
+    /* ===== 岗位详情抽屉美化(克制高级风:去装饰、留白与灰度分层) ===== */
+    /* header:纯净白底,下边缘仅 1px 极淡发丝线(hairline) */
     .el-drawer .el-drawer__header {
-      margin-bottom: 14px;
-      padding: 16px 20px 12px;
+      margin-bottom: 4px;
+      padding: 18px 20px 14px;
       position: relative;
       align-items: flex-start;
-      background: linear-gradient(180deg, #f5f8ff 0%, #ffffff 100%);
+      background: #fff;
     }
     .el-drawer .el-drawer__header::after {
       content: "";
       position: absolute;
-      left: 0; right: 0; bottom: 0;
-      height: 2px;
-      background: linear-gradient(
-        90deg,
-        var(--el-color-primary) 0%,
-        var(--el-color-primary-light-5) 40%,
-        rgba(64, 158, 255, 0) 100%
-      );
+      left: 20px; right: 20px; bottom: 0;
+      height: 1px;
+      background: rgba(17, 31, 51, 0.07);
     }
-    .el-drawer .el-drawer__body { padding: 4px 20px 24px; }
-    /* body 滚动条细化(现代细节) */
+    .el-drawer .el-drawer__body { padding: 10px 20px 28px; }
+    /* body 滚动条细化 */
     .el-drawer .el-drawer__body::-webkit-scrollbar { width: 8px; }
     .el-drawer .el-drawer__body::-webkit-scrollbar-thumb {
       background: #d7dce5; border-radius: 4px;
     }
     .el-drawer .el-drawer__body::-webkit-scrollbar-thumb:hover { background: #c2c9d4; }
-    /* 区块标题:渐变竖条前缀,与 header 视觉语言统一 */
+    /* 区块标题:小号灰字,无装饰,靠字重与留白分层 */
     .el-drawer .block-title {
-      font-size: 13px; font-weight: 600; margin: 18px 0 8px;
-      display: flex; align-items: center; gap: 7px;
-      letter-spacing: .5px; color: var(--el-text-color-primary);
+      font-size: 12px; font-weight: 600; margin: 20px 0 8px;
+      display: flex; align-items: center;
+      letter-spacing: 1px; color: var(--el-text-color-secondary);
     }
-    .el-drawer .block-title::before {
-      content: "";
-      width: 4px; height: 14px; border-radius: 2px; flex-shrink: 0;
-      background: linear-gradient(180deg, var(--el-color-primary), var(--el-color-primary-light-5));
+    /* 信息表格去网格化:无边框无底色,label 灰字,行间仅极淡横线(spec-sheet 风) */
+    .el-drawer .el-descriptions__body { background: transparent; }
+    .el-drawer .el-descriptions__table .el-descriptions__cell {
+      border: none !important;
+      border-bottom: 1px solid rgba(17, 31, 51, 0.05) !important;
+      padding: 9px 12px 9px 0;
     }
-    /* 信息表格卡片化:圆角+投影+label 淡底 */
-    .el-drawer .el-descriptions { --el-descriptions-item-bordered-label-background: #f5f8fc; }
-    .el-drawer .el-descriptions__body {
-      border-radius: 10px; overflow: hidden;
-      box-shadow: 0 1px 2px rgba(15, 39, 76, 0.05);
+    .el-drawer .el-descriptions__table tr:last-child .el-descriptions__cell {
+      border-bottom: none !important;
     }
-    /* 抽屉内标签统一胶囊风格 */
-    .el-drawer .el-tag { border-radius: 999px; }
-    /* 备注区:警示 callout 卡片 */
+    .el-drawer .el-descriptions__label.is-bordered-label {
+      background: transparent !important;
+      color: var(--el-text-color-secondary);
+      font-weight: 400;
+    }
+    /* 备注区:柔和 callout(仅左侧警示条,无边框) */
     .el-drawer .remark-box {
-      background: #fff9f0;
-      border: 1px solid #ffe3bd;
-      border-left: 4px solid var(--el-color-warning);
-      border-radius: 8px;
-      padding: 10px 12px;
+      background: #fffaf3;
+      border-left: 3px solid #e6a23c;
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px;
       font-size: 13px; line-height: 1.8; color: var(--el-text-color-primary);
       user-select: text; cursor: text;
     }
-    /* 置顶操作按钮:圆角+渐变主按钮+hover 上浮微交互 */
-    .el-drawer .drawer-actions .el-button {
-      border-radius: 8px;
-      transition: transform .15s ease, box-shadow .15s ease;
-    }
-    .el-drawer .drawer-actions .el-button:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 10px rgba(64, 158, 255, 0.28);
-    }
-    .el-drawer .drawer-actions .el-button--primary {
-      background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
-      border: none;
-    }
-    /* 描述卡片化:细边框+圆角(覆盖全局 drawer-desc 的无边框底色) */
+    /* 置顶操作按钮:圆角适度,无渐变无动效 */
+    .el-drawer .drawer-actions .el-button { border-radius: 8px; }
+    /* 描述区:极淡底色+发丝边框 */
     .el-drawer .drawer-desc {
-      background: #f8fafd; border: 1px solid #edf1f7; border-radius: 10px;
+      background: #fafbfd; border: 1px solid rgba(17, 31, 51, 0.06); border-radius: 10px;
     }
     /* 关联/扩展词条标签内的关联图标 */
     .hit-ico { vertical-align: -3px; margin-right: 3px; }
