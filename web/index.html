@@ -79,28 +79,33 @@
       transition: transform .15s; user-select: none;
     }
     .top-plat:hover, .top-plat.active { transform: scale(1.15); }
+    /* 未选中且未悬停:徽标半透明,悬停/选中恢复不透明;
+       指示灯是徽标的兄弟节点,不随透明度变暗,运行/异常灯保持醒目 */
+    .top-plat .plogo { opacity: .5; transition: opacity .15s; }
+    .top-plat:hover .plogo, .top-plat.active .plogo { opacity: 1; }
     /* 最近任务结果临时状态:完成→绿环,异常→红环(运行中指示灯绿点优先覆盖);
        纯图标按钮上用外圈阴影环(原 inset 描边会被整幅徽标图片盖住) */
     .top-plat.st-done { box-shadow: 0 0 0 1.5px #22c55e; }
     .top-plat.st-error { box-shadow: 0 0 0 1.5px #dc2626; }
 
     /* ---------- 顶部中心状态区(常驻,absolute 居中,不参与顶栏 flex 布局) ---------- */
-    /* 顶栏铺品牌主题色(选中平台),文字用白色保证可读;空闲=灰点+平台名+「空闲」;
-       运行=绿点(加白环隔离品牌色底)+进度(超长省略)+计数徽章 */
+    /* 白色圆角框承载(与左侧品牌区同款),内部不受顶栏品牌主题色影响;
+       空闲=灰点+平台名+「空闲」;运行=绿点+进度(超长省略)+计数徽章 */
     .top-status {
-      position: absolute; left: 50%; transform: translateX(-50%);
-      top: 0; height: 100%; max-width: 46vw;
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      max-width: 46vw;
       display: flex; align-items: center; gap: 20px;
+      background: var(--card); border-radius: 10px; padding: 5px 14px;
+      box-shadow: 0 1px 4px rgba(16, 24, 40, .10);
     }
     .ts-item { position: relative; display: flex; align-items: center; gap: 7px; max-width: 470px; }
-    .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: #fff; }
-    .ts-idle { font-size: 12px; color: rgba(255, 255, 255, .78); }
+    .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
+    .ts-idle { font-size: 12px; color: var(--text3); }
     .ts-progress {
-      font-size: 12px; color: rgba(255, 255, 255, .85); max-width: 220px; min-width: 0;
+      font-size: 12px; color: var(--text2); max-width: 220px; min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .ts-counters { display: flex; gap: 4px; flex-shrink: 0; }
-    .top-status .dot.on { box-shadow: 0 0 0 2px rgba(255, 255, 255, .4), 0 0 6px rgba(34, 197, 94, .6); }
     .tsc {
       font-size: 11px; padding: 1px 6px; border-radius: 4px; line-height: 16px;
       background: #eef2f7; color: #5a6472; white-space: nowrap;
@@ -119,16 +124,16 @@
     /* ---------- 布局 ---------- */
     .layout { display: flex; height: calc(100vh - 56px); }
     .side {
-      /* 状态卡定居顶栏中心后左栏再收窄 20px(396→376→356)让位右侧表格;
-         与右栏间隔 = 右 padding 12 + main 左 padding 2 = 14px */
-      width: 356px; flex-shrink: 0; padding: 10px 12px;
+      /* 状态卡定居顶栏中心后左栏收窄(396→376→356)让位右侧表格;
+         与右栏间隔 = 右 padding 6 + main 左 padding 2 = 8px(与 .side 卡片间 8px 节奏一致) */
+      width: 356px; flex-shrink: 0; padding: 10px 6px 10px 12px;
       /* 滚动条常驻:内容高度随平台/任务状态变化(如「最近任务」卡片空/非空差 8px),
          若用 auto,高度恰在临界点时滚动条会忽隐忽现,内容区宽度跳 15px,卡片看起来"变宽" */
       overflow-y: scroll; scrollbar-gutter: stable;
       display: flex; flex-direction: column; gap: 8px;
     }
-    /* 右栏边距与左栏一致(上/右/下 10/12,左 2px 与 side 右 padding 合计 14px 间隔):
-       顶栏下方两侧首行内容对齐 */
+    /* 右栏边距与左栏一致(上/右/下 10/12;左 2px 与 side 右 padding 6 合计 8px 间隔,
+       与 .side 卡片间 8px 节奏一致):顶栏下方两侧首行内容对齐 */
     .main { flex: 1; min-width: 0; padding: 10px 12px 10px 2px; display: flex; flex-direction: column; }
 
     .card {
@@ -292,9 +297,9 @@
     .combo-line.is-done .c-mark { color: var(--el-color-success); }
 
     /* ---------- 任务历史 ---------- */
-    /* 贴底:不参与左栏 flex 拉伸,margin-top:auto 把任务卡推到左栏底边;
-       运行状态卡(仅运行时出现)插在其上方,恰好填进贴底腾出的空档 */
-    .task-card { display: flex; flex-direction: column; flex: none; margin-top: auto; }
+    /* 贴顶:去除贴底 auto 外边距,紧随「发起抓取」之后(.side flex gap 8px),
+       左栏卡片整体从顶部堆叠,底部留白 */
+    .task-card { display: flex; flex-direction: column; flex: none; }
     /* 行高锁定 36px(含 1px 分隔线,内容垂直居中):5 行 = 180px 数学恒等,
        不依赖 el-tag 的实际渲染高度 */
     .task-scroll {
@@ -532,9 +537,9 @@
       </div>
     </div>
 
-    <!-- 顶部中心状态区(常驻):当前平台恒在首位(空闲=灰点+「空闲」;
-         运行=绿点+进度+计数徽章),其后为其它运行中平台(多平台并发同屏);
-         悬停运行中的平台段向下浮层展开任务组合(词条×城市) -->
+    <!-- 顶部中心状态区(常驻,白色圆角框——内部不受品牌主题色影响):
+         当前平台恒在首位(空闲=灰点+「空闲」;运行=绿点+进度+计数徽章),
+         其后为其它运行中平台(多平台并发同屏);悬停运行中的平台段向下浮层展开任务组合 -->
     <div class="top-status">
       <div class="ts-item" v-for="seg in statusSegments" :key="seg.pid"
            @mouseenter="comboHover = seg.pid" @mouseleave="comboHover = null">
@@ -601,7 +606,7 @@
         </div>
 
         <!-- 模式内容区按内容自适应高度(标签区各自限高内部滚动):
-             切换模式时抓取卡高度会变化,贴底的最近任务卡位置不变、仅上方间隔变化 -->
+             切换模式时抓取卡高度变化,最近任务卡紧随其上下移 -->
         <template v-if="grab.mode === 'quick'">
           <div class="field-label">岗位设置</div>
           <div class="table-combo" style="width:100%">
@@ -667,7 +672,7 @@
       </div>
 
       <!-- 最近任务:全平台混排(行首平台徽标),固定 5 行高度、行区独立滚动、
-           触底自动加载更早记录——margin-top:auto 贴左栏底边 -->
+           触底自动加载更早记录——贴顶堆叠,紧随「发起抓取」卡之后 -->
       <div class="card task-card">
         <div class="card-title">最近任务<span class="aux">全平台 · 下滚加载更早</span></div>
         <div class="task-scroll" @scroll="onTaskListScroll">
