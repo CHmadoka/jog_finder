@@ -6,7 +6,7 @@ from __future__ import annotations
 
 # ============ 前程无忧 job51 ============
 JOB51 = {
-    # we.51job.com 城市代码(常用城市;未收录时回退全国)
+    # we.51job.com 城市代码(常用城市;未收录时启动前拒绝)
     "city_codes": {
         "全国": "000000",
         "北京": "010000",
@@ -29,11 +29,12 @@ JOB51 = {
         "无锡": "070400",
         "青岛": "120300",
     },
-    # 列表页内嵌 JSON 变量名(按优先级)
+    # 列表页内嵌 JSON 变量名(2026-11 实测:we.51job.com 为 SPA 无内嵌 JSON,
+    # 列表数据走页内 fetch /api/job/search-pc 接口直连;此处仅作旧版页面兜底)
     "result_globals": ["window.__SEARCH_RESULT__", "window.__INITIAL_STATE__"],
     # 内嵌 JSON 中岗位数组的候选键
     "result_list_keys": ["engine_search_result", "engine_jds", "items", "jobs"],
-    # DOM 兜底:列表卡片
+    # DOM 兜底:列表卡片(旧版结构)
     "card": ".j_joblist .e, .j_joblist .el",
     "card_title": ".jname .title, .tspan.ttl a, .t a",
     "card_company": ".cname, .t2 a",
@@ -102,37 +103,33 @@ BOSS = {
 
 # ============ 猎聘 liepin ============
 LIEPIN = {
+    # 2026-11 实测(搜索页 cond-init 响应 hotCities):全国=410,市码=省码+市序号
     "city_codes": {
-        "全国": "000",
+        "全国": "410",
         "北京": "010",
         "上海": "020",
+        "天津": "030",
+        "重庆": "040",
         "广州": "050020",
         "深圳": "050090",
-        "杭州": "070",
-        "成都": "280",
-        "武汉": "170",
-        "南京": "060",
-        "西安": "270",
+        "南京": "060020",
         "苏州": "060080",
-        "天津": "030",
-        "重庆": "290",
-        "长沙": "190",
-        "郑州": "220",
-        "合肥": "240",
-        "厦门": "230",
-        "青岛": "110",
-        "宁波": "080",
-        "无锡": "060090",
+        "杭州": "070020",
+        "成都": "280020",
+        "武汉": "170020",
+        "西安": "270020",
+        "大连": "210040",
     },
-    # 列表页内嵌 JSON:猎聘 SSR 数据 window.__INITIAL_STATE__ / __NEXT_DATA__
-    "result_globals": ["window.__INITIAL_STATE__", "window.__NEXT_DATA__"],
-    "result_list_keys": ["jobList", "cardList", "list"],
-    "card": ".job-list .job-card-pc-container, ul.sojobs li, .job-card-box",
-    "card_title": ".job-title, .job-info h3 a",
-    "card_salary": ".job-info .salary, .job-salary",
-    "card_company": ".company-info .company-name, .sojob .company-name a",
-    "card_tags": ".job-info .job-info-list span, .labels span",
-    "card_link": "h3 a, .job-title a",
+    # 2026-11 实测:猎聘为 SPA,无 SSR 全局变量;列表数据走"导航驱动 + 响应监听"
+    # (页面自己发出的 pc-search-job 签名请求),DOM 卡片仅作兜底
+    "result_globals": [],
+    "result_list_keys": ["jobCardList"],
+    # DOM 兜底:列表卡片(语义类名稳定;前缀 hash 类名不稳定,不用于选择器)
+    "card": ".jobCardPcContainer",
+    "card_link": "a[data-nick='job-detail-job-info']",
+    "card_title_attr": ".jobTitleBox div[title]",
+    "card_company": ".companyName",
+    # 详情页
     "detail_ld_json": 'script[type="application/ld+json"]',
     "detail_desc": ".job-intro-container, .job-item-desc, [class*='job-detail']",
     "detail_title": "h1, .title-info h1",

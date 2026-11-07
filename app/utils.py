@@ -146,6 +146,8 @@ def active_estimate_from_text(text: str, now: datetime | None = None) -> str:
 
     if t.startswith(("刚刚", "在线")):
         return fmt_dt(now) or ""
+    if re.fullmatch(r"(当前|正在)?在线", t):          # 猎聘"当前在线"=刚刚
+        return fmt_dt(now) or ""
     if t.startswith("今日"):
         return now.strftime("%Y-%m-%d") + " 活跃"
     if t.startswith("昨日"):
@@ -159,6 +161,12 @@ def active_estimate_from_text(text: str, now: datetime | None = None) -> str:
     m = re.search(r"(\d+)\s*天前", t)
     if m:
         return fmt_dt(now - timedelta(days=int(m.group(1)))) or ""
+    m = re.search(r"(\d+)\s*周前", t)
+    if m:
+        return fmt_dt(now - timedelta(weeks=int(m.group(1)))) or ""
+    m = re.search(r"(\d+)\s*个?月前", t)
+    if m:
+        return fmt_dt(now - timedelta(days=30 * int(m.group(1)))) or ""
     if "本周" in t or "近一周" in t:
         return fmt_dt(now - timedelta(days=7)) + "后"
     if "近两周" in t:

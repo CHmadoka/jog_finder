@@ -55,7 +55,8 @@ def parse_salary_months(salary: str) -> int | None:
 def parse_salary_k(salary: str) -> tuple[float, float] | None:
     """把薪资文本解析为 (最低K, 最高K)/月;无法解析返回 None。
 
-    支持:"15-25K·16薪" / "1.5-2.5万" / "20K" / "2万-3万" / "30-60万/年"(折算到月)。
+    支持:"15-25K·16薪" / "1.5-2.5万" / "20K" / "2万-3万" / "9千-1.5万"(两侧
+    单位可不同,分别换算)/ "30-60万/年"(折算到月)。
     日薪("元/天")与"面议"等无法换算为月薪的文本返回 None。
     """
     s = (salary or "").strip().replace(",", "")
@@ -66,13 +67,19 @@ def parse_salary_k(salary: str) -> tuple[float, float] | None:
     if m:
         lo, hi = float(m.group(1)), float(m.group(2))
         return (lo * 10 / 12, hi * 10 / 12)
-    m = re.search(r"([\d.]+)\s*[-~至]\s*([\d.]+)\s*(万|千|[kK])", s)
+    # 区间:两侧单位可不同("9千-1.5万" = 9K~15K);缺省单位按高值侧
+    m = re.search(
+        r"([\d.]+)\s*(万|千|[kK])?\s*[-~至]\s*([\d.]+)\s*(万|千|[kK])", s
+    )
     if m:
-        unit = 10 if m.group(3) == "万" else 1
-        lo, hi = float(m.group(1)), float(m.group(2))
+        def unit_mul(u: str | None, default: str) -> float:
+            u = u or default
+            return 10 if u == "万" else 1
+        lo, hi = float(m.group(1)), float(m.group(3))
+        lo, hi = lo * unit_mul(m.group(2), m.group(4)), hi * unit_mul(m.group(4), m.group(4))
         if lo > hi:
             lo, hi = hi, lo
-        return (lo * unit, hi * unit)
+        return (lo, hi)
     m = re.search(r"([\d.]+)\s*(万|千|[kK])", s)
     if m:
         v = float(m.group(1)) * (10 if m.group(2) == "万" else 1)

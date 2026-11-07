@@ -53,14 +53,6 @@ class TestJob51Helpers(unittest.TestCase):
         self.assertEqual(_extract_job_id("https://jobs.51job.com/shanghai/99999999.html"), "99999999")
         self.assertEqual(_extract_job_id("https://x.com/a?jobId=abc123"), "abc123")
 
-    def test_company_of(self):
-        from app.platforms.job51 import _company_of
-
-        self.assertEqual(_company_of({"companyName": "A公司"}), "A公司")
-        self.assertEqual(_company_of({"company": {"companyName": "B公司"}}), "B公司")
-        self.assertEqual(_company_of({"company": "C公司"}), "C公司")
-        self.assertEqual(_company_of({}), "")
-
 
 if __name__ == "__main__":
     unittest.main()

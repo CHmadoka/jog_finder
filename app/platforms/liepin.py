@@ -1,17 +1,31 @@
-"""猎聘(liepin.com)适配器。
+"""猎聘(liepin.com)适配器 —— 响应监听版,对齐 Boss 高标准(2026-11 实测校准)。
 
-SSR 数据(window.__INITIAL_STATE__)优先,JSON-LD 详情兜底,DOM 兜底解析列表。
+要点:
+- 猎聘搜索接口(api-c.liepin.com /pc-search-job)有请求签名墙(页内直发 flag=-1400,
+  实测),不复刻签名:改为**导航驱动 + 响应监听**——goto 搜索页 URL,页面自身
+  发出的签名请求由 expect_response 捕获,拿到结构化 JSON(jobCardList,每页 ~40 条,
+  含公司行业/规模/融资阶段/HR活跃文案/刷新时间);DOM 卡片解析兜底
+- 列表不带职位描述:逐岗打开详情页,JSON-LD(schema.org JobPosting)优先,
+  DOM(.job-intro-container)兜底
+- 节奏:详情页随机 2~8s 间隔(config.DETAIL_DELAY_*),翻页间 human_delay
+- 风控:验证页特征即时判定(AntiBot 中止);登录页跳转立即中止
+- 活跃度:recruiter.imShowText("1天前在线")→ 统一估算规则;缺失退回 refreshTime
+- 平台行为:猎聘搜索结果会混入外地"推荐"岗位,dq 字段如实记录城市,不做过滤
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import random
 import re
+from datetime import datetime
 from typing import AsyncIterator
 from urllib.parse import quote
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
+from ..config import config
 from ..utils import (
     active_estimate_from_text,
     fmt_dt,
@@ -22,7 +36,7 @@ from ..utils import (
 )
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
-from .common import deep_find_list, parse_salary_months, read_window_global, salary_in_range, strip_html
+from .common import deep_find_list, parse_salary_months, salary_in_range, strip_html
 from .selectors import LIEPIN
 
 logger = logging.getLogger(__name__)
@@ -38,10 +52,32 @@ def _active_from_text(text: str) -> str:
 
 
 def _job_id_from_url(url: str) -> str:
-    m = re.search(r"/job/([A-Za-z0-9]+)\.shtml", url or "")
+    m = re.search(r"/job/(\d+)\.shtml", url or "")
     if m:
         return m.group(1)
     return re.sub(r"\W+", "_", (url or ""))[-60:]
+
+
+def _parse_compact_dt(s: str) -> datetime | None:
+    """解析猎聘紧凑时间串 '20251103160956'(YYYYMMDDHHMMSS,可缺时分秒)。"""
+    m = re.fullmatch(r"(20\d{2})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?", str(s or "").strip())
+    if not m:
+        return None
+    try:
+        return datetime(
+            int(m.group(1)), int(m.group(2)), int(m.group(3)),
+            int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0),
+        )
+    except ValueError:
+        return None
+
+
+# 猎聘风控特征:验证页 URL / 页面文案。命中即中止任务(不重试连发)。
+# 实测风控页:safe.liepin.com/v/intercept/verifysms(短信验证,"账号行为异常")
+_VERIFY_URL_RE = re.compile(r"verify|captcha|validate", re.I)
+_VERIFY_TEXT_RE = re.compile(r"安全验证|拖动滑块|完成验证|人机验证|安全挑战|账号行为异常|安全中心")
+# 详情页正常渲染特征区块(存在即绝非验证/拦截页)
+_DETAIL_DOM_RE = ".job-intro-container, .job-item-desc, [class*='job-detail'], .job-intro"
 
 
 class LiepinPlatform(BasePlatform):
@@ -49,6 +85,7 @@ class LiepinPlatform(BasePlatform):
     name = "猎聘"
     home_url = "https://www.liepin.com"
     home_prefix = "https://www.liepin.com"
+    detail_url_marker = "/job/"
 
     def supported_cities(self) -> set[str]:
         return set(LIEPIN["city_codes"]) - {"全国"}
@@ -60,21 +97,56 @@ class LiepinPlatform(BasePlatform):
         except PWTimeout:
             pass
         await page.wait_for_timeout(2000)
-        # 已登录页头显示昵称/头像;未登录有"登录"入口
-        entry = page.locator("a:has-text('登录'), .login-btn").first
+        # 已登录页头显示昵称/头像;未登录页头有可见"登录/注册"入口。
+        # 限定页头区域(top<200)且整词匹配,避免正文推广位的"登录"字样误伤
         try:
-            if await entry.is_visible():
+            state = await page.evaluate(
+                """() => {
+                    const vis = el => el && (el.offsetHeight || 0) > 0;
+                    const entry = [...document.querySelectorAll('a,button,span,div')]
+                        .find(e => vis(e)
+                            && e.getBoundingClientRect().top < 200
+                            && /^(登录\\/注册|登录|登陆)$/.test((e.innerText || '').trim()));
+                    return JSON.stringify({ login: !!entry });
+                }"""
+            )
+            st = json.loads(state or "{}")
+            if st.get("login"):
                 return False
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
         # 兜底:页面出现明确的未登录文案时判定未登录(登录入口选择器可能失效)
         try:
             body = (await page.evaluate("() => (document.body?.innerText||'').slice(0, 3000)")) or ""
-            if re.search(r"请登录|登录/注册|您好,游客|您好，游客", body):
+            if re.search(r"请登录|您好,游客|您好，游客", body):
                 return False
         except Exception:  # noqa: BLE001
             pass
         return True
+
+    # ---------- 风控 ----------
+    async def _is_verify_page(self, page: Page) -> bool:
+        try:
+            u = page.url or ""
+            if _VERIFY_URL_RE.search(u):
+                return True
+            title = (await page.title()) or ""
+            if _VERIFY_TEXT_RE.search(title):
+                return True
+            # 详情页结构仍在 → 内容正常渲染,不是验证页
+            if await page.query_selector(_DETAIL_DOM_RE):
+                return False
+            text = (await page.evaluate("() => (document.body?.innerText||'').slice(0,2000)")) or ""
+            # 正文误报防线:验证页正文极少(标题+滑块),要求内容足够短才凭文本判定
+            return bool(_VERIFY_TEXT_RE.search(text)) and len(text) < 600
+        except Exception:
+            return False
+
+    async def _raise_if_verify(self, page: Page) -> None:
+        if await self._is_verify_page(page):
+            raise AntiBot(
+                "猎聘触发安全验证,任务已暂停。请在浏览器中完成验证后重新开始任务(已抓岗位自动跳过)"
+            )
 
     # ---------- 搜索 ----------
     def _search_url(self, city: str, keyword: str, page_num: int) -> str:
@@ -87,97 +159,133 @@ class LiepinPlatform(BasePlatform):
 
     async def _wait_list(self, page: Page) -> None:
         try:
-            await page.wait_for_selector(
-                ".job-card-pc-container, .job-list-box li, .sojobs li", timeout=12000
-            )
+            await page.wait_for_selector(".jobCardPcContainer, .job-list-box", timeout=12000)
         except PWTimeout:
             pass
         await page.wait_for_timeout(1500)
 
     # ---------- 列表解析 ----------
-    async def _parse_list(self, page: Page, city: str, warn=None) -> list[JobDraft]:
+    async def _parse_list_json(self, data: dict, city: str, warn) -> list[JobDraft]:
+        """解析捕获的搜索接口响应(flag=1,jobCardList)。"""
         drafts: list[JobDraft] = []
-        data = await read_window_global(page, LIEPIN["result_globals"])
-        jobs = deep_find_list(data, LIEPIN["result_list_keys"]) if data else None
-        if jobs:
-            for j in jobs:
-                title = j.get("title") or j.get("jobName") or j.get("name") or ""
-                if not title:
-                    # 字段异常:条目缺职位名,无法入库,记录到异常面板(带链接)
-                    if warn is not None:
-                        jid0 = str(j.get("jobId") or j.get("jobid") or j.get("id") or "")
-                        u0 = f"https://www.liepin.com/job/{jid0}.shtml" if jid0 else ""
-                        await warn(
-                            ["猎聘列表字段异常: 条目缺少职位名,该岗位已跳过(平台可能已改版)"],
-                            u0,
-                        )
-                    continue
-                jid = str(j.get("jobId") or j.get("jobid") or j.get("id") or "")
-                url = j.get("jobUrl") or (f"https://www.liepin.com/job/{jid}.shtml" if jid else "")
-                salary = j.get("salary") or j.get("salaryStr") or ""
-                area = j.get("cityRegion") or j.get("dq") or j.get("city") or ""
-                district = area.split("-")[-1].strip() if "-" in area else ""
-                active_text = str(j.get("activeTime") or j.get("bossActiveDesc") or "")
-                active = _active_from_text(active_text)
-                tags = j.get("jobLabels") or j.get("labels") or []
-                exp = edu = ""
-                for t in tags if isinstance(tags, list) else []:
-                    ts = str(t)
-                    if "经验" in ts or "年" in ts:
-                        exp = exp or ts
-                    elif "学历" in ts or "本科" in ts or "硕士" in ts or "大专" in ts:
-                        edu = edu or ts
-                drafts.append(
-                    JobDraft(
-                        platform_job_id=jid or _job_id_from_url(url) or title,
-                        title=str(title),
-                        url=url,
-                        company=str(j.get("companyName") or j.get("company") or ""),
-                        salary=salary,
-                        salary_months=parse_salary_months(salary),
-                        city=city or (area.split("-")[0].strip() if area else ""),
-                        district=district,
-                        experience=exp,
-                        education=edu,
-                        hr_name=str(j.get("bossName") or j.get("hrName") or ""),
-                        hr_title=str(j.get("bossTitle") or j.get("hrTitle") or ""),
-                        hr_active_at=active,
-                        hr_active_text=active_text,
-                        raw=j,
+        cards = deep_find_list(data, ["jobCardList"]) or []
+        for c in cards:
+            if not isinstance(c, dict):
+                continue
+            job = c.get("job") or {}
+            comp = c.get("comp") or {}
+            rec = c.get("recruiter") or {}
+            title = str(job.get("title") or "")
+            url = str(job.get("link") or "")
+            if url and "/job/" not in url:
+                # 非岗位卡片(猎聘混排的职播/问答/广告等 /a/ 链接):静默跳过,
+                # 不进详情流程(开了详情也只会被判"已下线",白耗一次请求)
+                continue
+            jid = _job_id_from_url(url) or str(job.get("jobId") or "")
+            if not title or not jid:
+                if warn is not None:
+                    await warn(
+                        ["猎聘列表字段异常: 条目缺少职位名或岗位链接,该岗位已跳过(平台可能已改版)"],
+                        url or "https://www.liepin.com",
                     )
+                continue
+            area = str(job.get("dq") or "")
+            city_name, district = (area.split("-", 1) + [""])[:2] if area else (city, "")
+            salary = str(job.get("salary") or "")
+            active_text = str(rec.get("imShowText") or "")
+            refresh = _parse_compact_dt(str(job.get("refreshTime") or ""))
+            drafts.append(
+                JobDraft(
+                    platform_job_id=jid,
+                    title=title,
+                    url=url,
+                    company=str(comp.get("compName") or ""),
+                    salary=salary,
+                    salary_months=parse_salary_months(salary),
+                    city=city_name or city,
+                    district=district.strip(),
+                    experience=str(job.get("requireWorkYears") or ""),
+                    education=str(job.get("requireEduLevel") or ""),
+                    hr_name=str(rec.get("recruiterName") or ""),
+                    hr_title=str(rec.get("recruiterTitle") or ""),
+                    hr_active_at=_active_from_text(active_text),
+                    hr_active_text=active_text,
+                    industry=str(comp.get("compIndustry") or ""),
+                    company_stage=str(comp.get("compStage") or ""),
+                    company_scale=str(comp.get("compScale") or ""),
+                    published_at=refresh,
+                    raw={"job": job, "comp": comp, "recruiter": {k: rec.get(k) for k in ("recruiterName", "recruiterTitle", "imShowText")}},
                 )
-            return drafts
-        # DOM 兜底
+            )
+        if not cards and warn is not None:
+            await warn(
+                ["猎聘接口响应无岗位数据(jobCardList 为空,可能被风控或页面已改版)"],
+                "https://www.liepin.com",
+            )
+        return drafts
+
+    async def _parse_list_dom(self, page: Page, city: str, warn) -> list[JobDraft]:
+        """DOM 兜底:.jobCardPcContainer 卡片,链接 + 文本模式解析(抗类名哈希变化)。"""
+        drafts: list[JobDraft] = []
         cards = page.locator(LIEPIN["card"])
         n = await cards.count()
         for i in range(n):
             card = cards.nth(i)
             try:
                 link = card.locator(LIEPIN["card_link"]).first
-                href = await link.get_attribute("href") if await link.count() else None
-                url = href or ""
-                if url and not url.startswith("http"):
-                    url = "https://www.liepin.com" + ("" if url.startswith("/") else "/") + url
-                title = (await card.locator(LIEPIN["card_title"]).first.text_content() or "").strip()
+                if not await link.count():
+                    continue
+                href = await link.get_attribute("href") or ""
+                if href and not href.startswith("http"):
+                    href = "https://www.liepin.com" + ("" if href.startswith("/") else "/") + href
+                # 职位名:jobTitleBox 内带 title 属性的 div(哈希类名不可靠)
+                title = ""
+                try:
+                    t_el = card.locator(LIEPIN["card_title_attr"]).first
+                    if await t_el.count():
+                        title = (await t_el.get_attribute("title") or "").strip()
+                except Exception:  # noqa: BLE001
+                    pass
                 if not title:
                     continue
-                company = (await card.locator(LIEPIN["card_company"]).first.text_content() or "").strip()
-                salary = (await card.locator(LIEPIN["card_salary"]).first.text_content() or "").strip()
-                tags = await card.locator(LIEPIN["card_tags"]).all_text_contents()
-                active_text = " ".join(t for t in tags if "活跃" in t).strip()
-                active = _active_from_text(active_text)
+                jid = _job_id_from_url(href)
+                if not jid:
+                    continue
+                text = (await card.inner_text()) or ""
+                m = re.search(r"【([^】]+)】", text)
+                area = m.group(1) if m else ""
+                city_name, district = (area.split("-", 1) + [""])[:2] if area else (city, "")
+                m_sal = re.search(r"(\d+(?:\.\d+)?\s*[-~至]\s*\d+(?:\.\d+)?\s*[kK万]|\d+(?:\.\d+)?\s*[kK万])", text)
+                salary = m_sal.group(1).replace(" ", "") if m_sal else ""
+                # 经验/学历/公司/HR/活跃(文本模式,与类名无关)
+                m_exp = re.search(r"(\d+[-~至]\d+年|\d+年以上|经验不限|应届生|在校生)", text)
+                m_edu = re.search(r"(博士|硕士|本科|大专|中专|中技|初中及以下|学历不限)", text)
+                m_hr = re.search(r"([\u4e00-\u9fa5A-Za-z·]{2,12}·[\u4e00-\u9fa5A-Za-z]{2,10})", text)
+                m_act = re.search(r"(刚刚在线|今日在线|昨日在线|\d+分钟前在线|\d+小时前在线|\d+天前在线|\d+周前在线|\d+个月?前在线|长期未在线)", text)
+                company = ""
+                try:
+                    c_el = card.locator(".companyName").first
+                    if await c_el.count():
+                        company = ((await c_el.text_content()) or "").strip()
+                except Exception:  # noqa: BLE001
+                    pass
                 drafts.append(
                     JobDraft(
-                        platform_job_id=_job_id_from_url(url) or title,
+                        platform_job_id=jid,
                         title=title,
-                        url=url,
+                        url=href,
                         company=company,
                         salary=salary,
                         salary_months=parse_salary_months(salary),
-                        city=city,
-                        hr_active_at=active,
-                        hr_active_text=active_text,
-                        raw={"tags": tags, "source": "dom"},
+                        city=city_name or city,
+                        district=district.strip(),
+                        experience=m_exp.group(1) if m_exp else "",
+                        education=m_edu.group(1) if m_edu else "",
+                        hr_name=m_hr.group(1).split("·")[0] if m_hr else "",
+                        hr_title=m_hr.group(1).split("·")[-1] if m_hr else "",
+                        hr_active_at=_active_from_text(m_act.group(1)) if m_act else "",
+                        hr_active_text=m_act.group(1) if m_act else "",
+                        raw={"tags": text.split("\n"), "source": "dom"},
                     )
                 )
             except Exception as exc:  # noqa: BLE001
@@ -187,20 +295,48 @@ class LiepinPlatform(BasePlatform):
             save_snapshot("liepin", "list_empty", html[:200000])
             if warn is not None:
                 await warn(
-                    ["猎聘列表解析出 0 个岗位(SSR数据与DOM均未命中,页面结构可能已变化)"],
+                    ["猎聘列表解析出 0 个岗位(接口响应与DOM均未命中,页面结构可能已变化)"],
                     page.url or "",
                 )
         return drafts
 
     # ---------- 详情解析 ----------
-    async def _parse_detail(self, page: Page, draft: JobDraft) -> None:
-        await human_delay()
+    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
+        """详情页:JSON-LD(schema.org JobPosting)优先,DOM 兜底;落地校验+风控/blank 检测。"""
+        # 详情页节奏:随机 2~8 秒/个(config.DETAIL_DELAY_*),模拟人工浏览
+        lo, hi = config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX
+        await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+        if should_stop is not None and should_stop():
+            return
         try:
             await page.goto(draft.url or self.home_url, wait_until="domcontentloaded", timeout=25000)
-        except PWTimeout:
+        except Exception:  # noqa: BLE001
             pass
+        # 落地校验:URL 需包含岗位 ID(防平台重定向)
+        landed = False
+        for _ in range(8):
+            if should_stop is not None and should_stop():
+                return
+            if draft.platform_job_id in (page.url or ""):
+                landed = True
+                break
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=1500)
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(0.5)
+        if not landed:
+            # 单次导航即定论,不做二次硬闯(反复刷新加重风控)
+            logger.warning("猎聘详情落地异常(视为已下线,跳过): %s -> %s", draft.title, (page.url or "")[:120])
+            draft.raw["offline"] = True
+            return
+        if "about:blank" in (page.url or "") or not ((await page.title()) or "").strip():
+            logger.warning("猎聘详情页被清空(反自动化拦截): %s", draft.title)
+            draft.raw["blanked"] = True
+            return
+        await self._raise_if_verify(page)
         await page.wait_for_timeout(1500)
-        # JSON-LD
+        # JSON-LD(schema.org JobPosting,实测存在且描述完整)
         try:
             ld_list = await page.evaluate(
                 "() => Array.from(document.querySelectorAll('script[type=\"application/ld+json\"]')).map(s => s.textContent)"
@@ -218,7 +354,7 @@ class LiepinPlatform(BasePlatform):
                         if isinstance(org, dict):
                             draft.company = draft.company or str(org.get("name") or "")
                         if o.get("datePosted") and not draft.published_at:
-                            draft.published_at = parse_relative_time(str(o["datePosted"]))
+                            draft.published_at = parse_relative_time(str(o["datePosted"])) or draft.published_at
         except Exception as exc:  # noqa: BLE001
             logger.debug("猎聘 JSON-LD 解析失败: %s", exc)
         # DOM 兜底:描述与 HR 区块
@@ -227,7 +363,7 @@ class LiepinPlatform(BasePlatform):
                 el = page.locator(LIEPIN["detail_desc"]).first
                 if await el.count():
                     draft.description = ((await el.text_content()) or "").strip()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         if not draft.hr_name:
             try:
@@ -239,7 +375,7 @@ class LiepinPlatform(BasePlatform):
                     if m and not draft.hr_active_at:
                         draft.hr_active_text = m.group(1)
                         draft.hr_active_at = _active_from_text(m.group(1))
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         if not draft.description and draft.url:
             html = await page.content()
@@ -264,7 +400,6 @@ class LiepinPlatform(BasePlatform):
         should_stop=None,
     ) -> AsyncIterator[JobDraft]:
         own_detail = detail_page is None
-        # 详情标签页懒创建:全部岗位都已入库时不开任何新标签
         dp = detail_page
         sal_rng = (extras or {}).get("salary") or ""
         try:
@@ -275,14 +410,31 @@ class LiepinPlatform(BasePlatform):
                 url = self._search_url(city, keyword, page_num)
                 if progress:
                     progress(f"打开第 {page_num} 页: {keyword}@{city or '全国'}")
+                # 导航驱动 + 响应监听:页面自己发的签名请求,捕获响应拿结构化数据
+                data = None
                 try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                except PWTimeout:
-                    pass
-                await self._wait_list(page)
-                if re.search(r"/login|passport", page.url):
+                    async with page.expect_response(
+                        lambda r: "pc-search-job" in r.url and "cond-init" not in r.url,
+                        timeout=20000,
+                    ) as ri:
+                        try:
+                            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        except PWTimeout:
+                            pass
+                        resp = await ri.value
+                        body = await resp.text()
+                    d = json.loads(body)
+                    if d.get("flag") == 1:
+                        data = d
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("猎聘响应捕获失败(走DOM兜底): %s", str(exc)[:120])
+                if re.search(r"/login|passport", (page.url or "")):
                     raise LoginRequired("猎聘跳转到登录页")
-                drafts = await self._parse_list(page, city)
+                await self._raise_if_verify(page)
+                if data is not None:                    drafts = await self._parse_list_json(data, city, warn)
+                else:
+                    await self._wait_list(page)
+                    drafts = await self._parse_list_dom(page, city, warn)
                 fresh = [d for d in drafts if d.platform_job_id and d.platform_job_id not in seen]
                 for d in drafts:
                     seen.add(d.platform_job_id)
@@ -292,7 +444,14 @@ class LiepinPlatform(BasePlatform):
                     progress(f"第 {page_num} 页无新岗位,继续翻页(翻完设定页数为止)")
                 if progress:
                     progress(f"第 {page_num} 页解析出 {len(fresh)} 个岗位")
+                sal_filtered = 0
                 for draft in fresh:
+                    # 薪资范围过滤:列表阶段直接排除,不打开详情页(解析失败不误杀)
+                    if sal_rng and draft.salary:
+                        in_rng = salary_in_range(draft.salary, sal_rng)
+                        if in_rng is False:
+                            sal_filtered += 1
+                            continue
                     # 详情前查重:已入库岗位不再打开详情页
                     if skip_check and await skip_check(draft.platform_job_id):
                         yield draft
@@ -302,8 +461,15 @@ class LiepinPlatform(BasePlatform):
                     if draft.url:
                         if dp is None:
                             dp = await page.context.new_page()
-                        await self._parse_detail(dp, draft)
+                        await self._parse_detail(dp, draft, should_stop=should_stop)
                     yield draft
+                if sal_filtered and progress:
+                    progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")
+                if not fresh and page_num > 1 and not drafts:
+                    # 空页(接口返回空列表/DOM 无卡片)= 结果翻完,提前结束
+                    if progress:
+                        progress(f"第 {page_num} 页为空页,已翻完全部结果")
+                    break
                 if page_num < max_pages:
                     await human_scroll(page)
                     await human_delay()
@@ -311,7 +477,7 @@ class LiepinPlatform(BasePlatform):
             if own_detail and dp is not None:
                 try:
                     await dp.close()
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
 
 
