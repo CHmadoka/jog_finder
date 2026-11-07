@@ -9,12 +9,17 @@ const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vu
 const { ElMessage, ElMessageBox } = ElementPlus;
 
 const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎聘" };
-// 平台徽标(左栏平台按钮):三家官方应用图标(512px 源图转 128px PNG)已放进
-// web/(经 /assets 静态映射,离线可用);图片缺失/加载失败时回退到品牌色文字徽标
+// 平台徽标(左栏平台按钮):三家官方应用图标(1024px 无损源图)已放进 web/
+// (经 /assets 静态映射,离线可用);图片缺失/加载失败时回退到品牌色文字徽标。
+// 1x/2x/3x 三档文件由 scripts/gen_logos.py 按 .plogo 的 CSS 尺寸生成,
+// 浏览器按屏幕像素比直接挑像素对齐的那张,不做运行时缩放(不会发虚)
+function logoSrcset(base) {
+  return [`${base}.png 1x`, `${base}@2x.png 2x`, `${base}@3x.png 3x`].join(", ");
+}
 const PLATFORM_LOGOS = {
-  boss: { img: "/assets/logo_boss.png", text: "B", color: "#00a6a7" },
-  job51: { img: "/assets/logo_51job.png", text: "51", color: "#ff6000" },
-  liepin: { img: "/assets/logo_liepin.png", text: "猎", color: "#d8262c" },
+  boss: { img: "/assets/logo_boss.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", color: "#00a6a7" },
+  job51: { img: "/assets/logo_51job.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", color: "#ff6000" },
+  liepin: { img: "/assets/logo_liepin.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", color: "#d8262c" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
@@ -222,9 +227,9 @@ const app = createApp({
     const logoBroken = reactive({});   // 徽标图片加载失败过的平台
     function platformLogo(pid) {
       const cfg = PLATFORM_LOGOS[pid];
-      if (!cfg) return { img: "", text: (pid || "?").slice(0, 1).toUpperCase(), color: "#8a94a6" };
+      if (!cfg) return { img: "", srcset: "", text: (pid || "?").slice(0, 1).toUpperCase(), color: "#8a94a6" };
       // 图片 404/解码失败时降级为文字徽标,避免出现裂图占位
-      if (logoBroken[pid]) return { img: "", text: cfg.text, color: cfg.color };
+      if (logoBroken[pid]) return { img: "", srcset: "", text: cfg.text, color: cfg.color };
       return cfg;
     }
     function onLogoError(pid) {

@@ -93,11 +93,12 @@
       background: var(--el-color-primary-light-9);
       /* 不变字重:避免选中时文字加粗引起宽度变化/抖动 */
     }
-    /* 平台徽标:官方应用图标(本地 PNG);img 缺失/加载失败回退品牌色文字块 */
+    /* 平台徽标:官方应用图标(本地 PNG,1x/2x/3x 三档);img 缺失/加载失败回退品牌色文字块。
+       尺寸须与 scripts/gen_logos.py 的 CSS_SIZE 一致,换尺寸要重跑脚本 */
     .plogo {
-      width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0;
+      width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
       display: inline-flex; align-items: center; justify-content: center;
-      color: #fff; font-size: 10px; font-weight: 700; letter-spacing: -.5px;
+      color: #fff; font-size: 12px; font-weight: 700; letter-spacing: -.5px;
       line-height: 1; overflow: hidden;
     }
     .plogo img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -462,8 +463,8 @@
                :class="{ active: grab.platform === p.id }" @click="switchPlatform(p.id)">
             <span class="badge" :class="isRunning(p.id) ? 'on' : 'off'"></span>
             <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
-              <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img" alt=""
-                   @error="onLogoError(p.id)">
+              <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img"
+                   :srcset="platformLogo(p.id).srcset" alt="" @error="onLogoError(p.id)">
               <template v-else>{{ platformLogo(p.id).text }}</template>
             </span>
             {{ p.name }}
