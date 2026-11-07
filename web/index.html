@@ -379,7 +379,7 @@
         </div>
 
         <!-- 存入目标表:抓取结果固定写入该表,与右栏浏览的工作表筛选分离 -->
-        <div class="field-label" style="margin-top:12px;">存入数据表(与右侧浏览无关)</div>
+        <div class="field-label" style="margin-top:12px;">存入数据表</div>
         <div class="table-combo" style="width:100%">
           <el-select v-model="grab.table_id" style="flex:1; min-width:0">
             <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
@@ -415,10 +415,10 @@
           <city-picker v-model="grab.cities"></city-picker>
 
           <div class="field-label">
-            限定词条(可选)
+            <span title="不改变所选岗位设置:填了则本次只抓这一个词条(适合先试抓一个词看效果);留空则抓取该设置的全部词条">限定词条(只抓这一个词,可选)</span>
             <span class="link" @click="grab.keyword = ''" v-if="grab.keyword">清除</span>
           </div>
-          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词,留空跑设置全部词条" clearable></el-input>
+          <el-input v-model="grab.keyword" placeholder="填了则只抓这一个词;留空抓取所选设置的全部词条" clearable></el-input>
 
           <div class="field-label">每词条最多翻页数</div>
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
@@ -458,8 +458,8 @@
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
         </template>
 
-        <!-- 两种模式共用:薪资范围(双输入,橙色K后缀,单边可缺省) -->
-        <div class="field-label">薪资范围(K/月,单边可缺省)</div>
+        <!-- 两种模式共用:薪资范围(双输入,橙色K后缀;两端留空即不限) -->
+        <div class="field-label">薪资范围(K/月)</div>
         <div style="display:flex; gap:6px; align-items:center;">
           <el-input v-model="grab.salary_min" placeholder="最低" clearable inputmode="decimal">
             <template #suffix><span class="k-unit">K</span></template>
@@ -683,11 +683,9 @@
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <el-tag v-if="currentJob.fit === true" type="success" effect="light">契合</el-tag>
         <el-tag v-else-if="currentJob.fit === false" type="danger" effect="light">不符</el-tag>
-        <el-tag v-else type="info" effect="light">未分析</el-tag>
         <el-tag effect="plain">{{ platformOf(currentJob.platform) }}</el-tag>
-        <el-tag v-if="currentJob.keyword" type="info" effect="plain">词条: {{ currentJob.keyword }}</el-tag>
         <el-tag v-for="k in hitKeywords" :key="'hit-' + k" type="warning" effect="light"
-                title="该词条出现在本岗位标题或描述中">命中: {{ k }}</el-tag>
+                title="该词条出现在本岗位标题或描述中">{{ k }}</el-tag>
       </div>
       <el-descriptions :column="2" size="small" border>
         <el-descriptions-item label="公司">{{ currentJob.company }}</el-descriptions-item>
@@ -716,7 +714,7 @@
       </el-descriptions>
       <div class="block-title">备注（不符合原因）</div>
       <el-text type="warning" v-if="currentJob.remark">{{ currentJob.remark }}</el-text>
-      <el-text type="info" v-else>无备注（判定契合或未分析）</el-text>
+      <el-text type="info" v-else>无备注（判定契合）</el-text>
       <div class="block-title">福利标签</div>
       <template v-if="welfareTags.length">
         <el-tag v-for="(w, i) in welfareTags" :key="i" size="small" effect="plain" style="margin:0 6px 6px 0">{{ w }}</el-tag>
@@ -890,7 +888,11 @@
           <el-option v-for="g in gears" :key="g.id" :label="g.name" :value="g.id"></el-option>
         </el-select>
       </el-form-item>
-      <el-form-item label="限定词条"><el-input v-model="filterForm.keyword" placeholder="留空则按设置全部词条抓取" style="width:280px" clearable></el-input></el-form-item>
+      <el-form-item label="限定词条">
+        <el-input v-model="filterForm.keyword" placeholder="留空则按设置全部词条抓取"
+                  title="保存后,用该条件抓取时只使用这一个词条;留空则使用所选岗位设置的全部词条"
+                  style="width:280px" clearable></el-input>
+      </el-form-item>
       <el-form-item label="薪资范围">
         <div style="display:flex; gap:8px; align-items:center; width:280px;">
           <el-input v-model="filterForm.salary_min" placeholder="最低" clearable>

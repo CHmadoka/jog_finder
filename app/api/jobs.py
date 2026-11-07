@@ -134,13 +134,12 @@ def jobs_stats(
     q: str | None = None,
     db: Session = Depends(get_session),
 ):
-    """当前筛选口径下的判定统计:总数/契合/不符/未析/HR在线。"""
+    """当前筛选口径下的判定统计:总数/契合/不符/HR在线。"""
     base = _filtered_query(db, platform, gear_id, None, city, has_remark, q, None, table_id, task_id)
     return {
         "total": base.count(),
         "fit": base.filter(Job.fit.is_(True)).count(),
         "unfit": base.filter(Job.fit.is_(False)).count(),
-        "unknown": base.filter(Job.fit.is_(None)).count(),
         "online": base.filter(Job.hr_online.is_(True)).count(),
     }
 
