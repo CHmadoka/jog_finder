@@ -277,6 +277,12 @@
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 600;
     }
+    /* 抽屉标题(标题词条同样高亮) */
+    .drawer-title { font-size: 16px; font-weight: 600; line-height: 1.5; word-break: break-all; }
+    .drawer-title mark {
+      background: #ffe58f; color: inherit; padding: 0 2px;
+      border-radius: 3px; font-weight: 700;
+    }
     /* 详情抽屉基础信息表格文本可选中复制 */
     .el-drawer .el-descriptions__body { user-select: text; cursor: text; }
     .block-title { font-size: 13px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; }
@@ -667,7 +673,12 @@
   </div>
 
   <!-- ===================== 岗位详情抽屉 ===================== -->
-  <el-drawer v-model="showDetail" :title="currentJob ? currentJob.title : '岗位详情'" size="52%">
+  <el-drawer v-model="showDetail" size="52%">
+    <template #header>
+      <!-- 标题词条高亮:入库匹配规则同样检查标题(未命中会记不符原因) -->
+      <span v-if="currentJob && highlightedTitle" class="drawer-title" v-html="highlightedTitle"></span>
+      <span v-else>岗位详情</span>
+    </template>
     <template v-if="currentJob">
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <el-tag v-if="currentJob.fit === true" type="success" effect="light">契合</el-tag>

@@ -287,26 +287,31 @@ const app = createApp({
       const raw = (currentJob.value || {}).keyword || "";
       return [...new Set(raw.split(/[、,，|;；]+/).map((s) => s.trim()).filter(Boolean))];
     });
-    // 命中词条:出现在标题或描述中的词条(标签展示;与描述内 <mark> 同源)
+    // 命中词条:出现在标题或描述中的词条(标签展示;与描述内 <mark> 同源)。
+    // 大小写不敏感——与入库匹配规则一致(evaluate_job 用 lower() 比较标题)
     const hitKeywords = computed(() => {
       const j = currentJob.value || {};
       if (!jobKeywords.value.length) return [];
-      const hay = `${j.title || ""}\n${j.description || ""}`;
-      return jobKeywords.value.filter((k) => hay.includes(k));
+      const hay = `${(j.title || "").toLowerCase()}\n${j.description || ""}`;
+      return jobKeywords.value.filter((k) => hay.includes(k.toLowerCase()));
     });
-    // 描述高亮 HTML:整段先 HTML 转义(防 XSS),再按词条(长词优先,避免
-    // "文员"截胡"仓库文员")替换为 <mark>;仅替换在描述中实际出现的词条
-    const highlightedDesc = computed(() => {
-      const desc = (currentJob.value || {}).description || "";
-      if (!desc) return "";
-      const esc = escapeHtml(desc);
+    // 通用高亮:文本先 HTML 转义(防 XSS),再按词条(长词优先,避免
+    // "文员"截胡"仓库文员")大小写不敏感地替换为 <mark>
+    function highlightText(text) {
+      const s = String(text || "");
+      if (!s) return "";
+      const esc = escapeHtml(s);
+      const lower = s.toLowerCase();
       const parts = jobKeywords.value
-        .filter((k) => desc.includes(k))
+        .filter((k) => lower.includes(k.toLowerCase()))
         .sort((a, b) => b.length - a.length)
         .map((k) => escapeReg(escapeHtml(k)));
       if (!parts.length) return esc;
-      return esc.replace(new RegExp(`(${parts.join("|")})`, "g"), "<mark>$1</mark>");
-    });
+      return esc.replace(new RegExp(`(${parts.join("|")})`, "gi"), "<mark>$1</mark>");
+    }
+    const highlightedDesc = computed(() => highlightText((currentJob.value || {}).description));
+    // 标题高亮:入库匹配规则同样看标题(未命中词条会记"标题未直接命中"),标题一并高亮
+    const highlightedTitle = computed(() => highlightText((currentJob.value || {}).title));
     // 异常面板为悬浮二级卡片:点击面板与唤起按钮以外的空白处即收起
     function onDocClick(ev) {
       if (!eventsOpen.value) return;
@@ -883,7 +888,7 @@ const app = createApp({
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,
-      jobKeywords, hitKeywords, highlightedDesc,
+      jobKeywords, hitKeywords, highlightedDesc, highlightedTitle,
       comboHover, comboCur,
       gearForm, filterForm, tableForm,
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
