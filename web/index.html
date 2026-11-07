@@ -277,20 +277,20 @@
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 600;
     }
-    /* 抽屉标题(词条高亮保留,无装饰前缀,靠字号字重分层) */
-    .drawer-title { font-size: 17px; font-weight: 600; line-height: 1.6; word-break: break-all; letter-spacing: .2px; }
+    /* 抽屉标题(词条高亮保留)——大字号重做视觉锚点,无装饰靠体量分层 */
+    .drawer-title { font-size: 20px; font-weight: 700; line-height: 1.5; word-break: break-all; letter-spacing: .3px; color: var(--el-text-color-primary); }
     .drawer-title mark {
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 700;
     }
     /* header 区(标题+置顶操作按钮):占满左侧,不随内容滚动 */
     .drawer-head { flex: 1; min-width: 0; }
-    .drawer-actions { margin-top: 8px; display: flex; gap: 10px; }
+    .drawer-actions { margin-top: 12px; display: flex; gap: 10px; }
     /* ===== 岗位详情抽屉美化(克制高级风:去装饰、留白与灰度分层) ===== */
     /* header:纯净白底,下边缘仅 1px 极淡发丝线(hairline) */
     .el-drawer .el-drawer__header {
       margin-bottom: 4px;
-      padding: 18px 20px 14px;
+      padding: 20px 20px 14px;
       position: relative;
       align-items: flex-start;
       background: #fff;
