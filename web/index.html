@@ -470,13 +470,14 @@
     /* ---------- 抓取异常(顶栏 logo 区右侧胶囊,面板向下浮层展开) ---------- */
     .event-wrap { position: relative; flex-shrink: 0; }
     .event-fab {
-      background: #fff; border: 1px solid #f3c1c1; color: #dc2626;
+      background: #fff; color: #dc2626;
       border-radius: 20px; padding: 8px 14px; font-size: 12px; cursor: pointer;
       box-shadow: 0 4px 14px rgba(220, 38, 38, .12);
       display: flex; align-items: center; gap: 6px; font-weight: 600;
-      transition: all .15s;
+      transition: box-shadow .15s;
     }
-    .event-fab:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(220, 38, 38, .2); }
+    /* 悬停不做位移偏移,仅加深阴影表达浮起(与品牌区/状态区胶囊同款无边框风格) */
+    .event-fab:hover { box-shadow: 0 6px 18px rgba(220, 38, 38, .25); }
     .event-fab .cnt {
       background: #dc2626; color: #fff; border-radius: 10px;
       padding: 1px 8px; font-weight: 700; font-size: 11px;
