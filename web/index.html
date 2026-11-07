@@ -309,13 +309,18 @@
       background: #d7dce5; border-radius: 4px;
     }
     .el-drawer .el-drawer__body::-webkit-scrollbar-thumb:hover { background: #c2c9d4; }
-    /* 区块标题:14px 主题色强调 */
+    /* 区块标题:14px 主题色强调,圆点前缀 */
     .el-drawer .block-title {
       font-size: 14px; font-weight: 600; margin: 20px 0 10px;
       display: flex; align-items: center;
       letter-spacing: .5px; color: var(--el-color-primary);
     }
-    .el-drawer .block-title .bt-ico { font-size: 15px; margin-right: 6px; }
+    .el-drawer .block-title::before {
+      content: "";
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--el-color-primary);
+      margin-right: 8px; flex-shrink: 0;
+    }
     /* 信息表格:保留表格形态并做精致——hairline 格线、圆角外框、
        label 淡底、行悬停微亮(spec-sheet 卡片风) */
     .el-drawer .el-descriptions__body {
@@ -789,15 +794,15 @@
           <span v-else style="color:var(--el-text-color-secondary)">—(早期数据或补全任务,无抓取任务记录)</span>
         </el-descriptions-item>
       </el-descriptions>
-      <div class="block-title"><el-icon class="bt-ico"><warning /></el-icon>备注（不符合原因）</div>
+      <div class="block-title">备注（不符合原因）</div>
       <div class="remark-box" v-if="currentJob.remark">{{ currentJob.remark }}</div>
       <el-text type="info" v-else>无备注（判定契合）</el-text>
-      <div class="block-title"><el-icon class="bt-ico"><present /></el-icon>福利标签</div>
+      <div class="block-title">福利标签</div>
       <template v-if="welfareTags.length">
         <el-tag v-for="(w, i) in welfareTags" :key="i" size="small" effect="plain" style="margin:0 6px 6px 0">{{ w }}</el-tag>
       </template>
       <el-text type="info" v-else>—</el-text>
-      <div class="block-title"><el-icon class="bt-ico"><document /></el-icon>职位描述</div>
+      <div class="block-title">职位描述</div>
       <div v-if="currentJob.description" class="drawer-desc"
            v-html="highlightedDesc"></div>
       <div v-else class="drawer-desc">（未抓取到描述）</div>
