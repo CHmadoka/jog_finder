@@ -50,6 +50,8 @@
       height: 56px; background: var(--card); border-bottom: 1px solid var(--border);
       display: flex; align-items: center; padding: 0 20px; gap: 14px;
       position: sticky; top: 0; z-index: 10;
+      /* 切换平台时品牌主题色背景平滑过渡 */
+      transition: background-color .3s;
     }
     .brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; }
     .brand .logo {
@@ -58,6 +60,13 @@
       display: flex; align-items: center; justify-content: center;
     }
     .topbar .spacer { flex: 1; }
+
+    /* 品牌 + 平台按钮所在的圆角区:顶栏铺品牌主题色时保持白底不受影响 */
+    .brand-zone {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--card); border-radius: 10px; padding: 5px 10px;
+      box-shadow: 0 1px 4px rgba(16, 24, 40, .10);
+    }
 
     /* ---------- 顶栏平台切换:纯圆角徽标按钮 ---------- */
     /* 品牌与平台按钮之间的竖线分隔 */
@@ -75,19 +84,18 @@
     .top-plat.st-done { box-shadow: 0 0 0 1.5px #22c55e; }
     .top-plat.st-error { box-shadow: 0 0 0 1.5px #dc2626; }
 
-    /* ---------- 顶部中心状态区(任一平台运行时显示,全空闲隐藏) ---------- */
-    .top-status {
-      position: absolute; left: 50%; transform: translateX(-50%);
-      top: 0; height: 100%;
-      display: flex; align-items: center; gap: 20px;
-    }
-    .ts-item { position: relative; display: flex; align-items: center; gap: 7px; max-width: 470px; }
+    /* ---------- 运行状态卡(左栏,位于「最近任务」卡片上方;全空闲整卡隐藏不占位) ---------- */
+    /* 多平台并发同屏:每平台一段 —— 上行 圆点+平台名+计数徽章,下行 进度单行省略 */
+    .status-card { flex: none; }
+    .ts-item { position: relative; }
+    .ts-item + .ts-item { margin-top: 10px; }
+    .ts-line { display: flex; align-items: center; gap: 7px; }
     .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
+    .ts-counters { display: flex; gap: 4px; margin-left: auto; }
     .ts-progress {
-      font-size: 12px; color: var(--text2); max-width: 250px;
+      font-size: 12px; color: var(--text2); margin-top: 4px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .ts-counters { display: flex; gap: 4px; flex-shrink: 0; }
     .tsc {
       font-size: 11px; padding: 1px 6px; border-radius: 4px; line-height: 16px;
       background: #eef2f7; color: #5a6472; white-space: nowrap;
@@ -278,9 +286,9 @@
     .combo-line.is-done .c-mark { color: var(--el-color-success); }
 
     /* ---------- 任务历史 ---------- */
-    /* 紧随「发起抓取」卡片之后(左栏顶部堆叠,由 .side 的 flex gap 8px 分隔):
-       顶部贴住抓取卡底部,不参与左栏 flex 拉伸 */
-    .task-card { display: flex; flex-direction: column; flex: none; }
+    /* 贴底:不参与左栏 flex 拉伸,margin-top:auto 把任务卡推到左栏底边;
+       运行状态卡(仅运行时出现)插在其上方,恰好填进贴底腾出的空档 */
+    .task-card { display: flex; flex-direction: column; flex: none; margin-top: auto; }
     /* 行高锁定 36px(含 1px 分隔线,内容垂直居中):5 行 = 180px 数学恒等,
        不依赖 el-tag 的实际渲染高度 */
     .task-scroll {
@@ -491,50 +499,29 @@
 <body>
 <div id="app">
   <!-- ===================== 顶栏 ===================== -->
-  <div class="topbar">
-    <div class="brand">
-      <span class="logo">J</span>
-      <span>JobFinder</span>
-    </div>
-    <!-- 品牌与平台切换之间的竖线分隔 -->
-    <span class="topbar-divider"></span>
-    <!-- 平台切换:纯圆角徽标按钮(无文字,名称见悬停提示),悬停放大、选中保持放大;
-         右上角指示灯 = 运行绿 / 空闲灰 / 最近任务异常红 -->
-    <div class="top-plats">
-      <div v-for="p in platforms" :key="p.id" class="top-plat" :title="p.name"
-           :class="{ active: grab.platform === p.id,
-                     'st-done': taskStatusOf(p.id) === 'done',
-                     'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
-        <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
-        <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
-          <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img"
-               :srcset="platformLogo(p.id).srcset" alt="" @error="onLogoError(p.id)">
-          <template v-else>{{ platformLogo(p.id).text }}</template>
-        </span>
+  <!-- 选中平台后顶栏铺对应品牌主题色;logo 与平台按钮所在的白色圆角区(brand-zone)不受影响 -->
+  <div class="topbar" :style="brandBg ? { background: brandBg } : null">
+    <div class="brand-zone">
+      <div class="brand">
+        <span class="logo">J</span>
+        <span>JobFinder</span>
       </div>
-    </div>
-
-    <!-- 顶部中心状态区:任一平台运行时显示(每平台一段:圆点+名称+进度+计数),
-         悬停平台段向下浮层展开任务组合(词条×城市);全空闲时隐藏 -->
-    <div class="top-status" v-if="runningPlatforms.length">
-      <div class="ts-item" v-for="rp in runningPlatforms" :key="rp.pid"
-           @mouseenter="comboHover = rp.pid" @mouseleave="comboHover = null">
-        <span class="dot on"></span>
-        <span class="ts-name">{{ platformOf(rp.pid) }}</span>
-        <span class="ts-progress" :title="rp.status.progress">{{ rp.status.progress || '正在准备…' }}</span>
-        <span class="ts-counters" v-if="rp.status.counters">
-          <span class="tsc">发现 {{ rp.status.counters.found || 0 }}</span>
-          <span class="tsc save">入库 {{ rp.status.counters.saved || 0 }}</span>
-          <span class="tsc skip" :title="skipTipOf(rp.pid)">跳过 {{ rp.status.counters.skipped || 0 }}</span>
-        </span>
-        <div class="combo-pop" v-if="rp.status.combos && comboHover === rp.pid">
-          <div class="combo-line" v-for="(c, i) in rp.status.combos.items" :key="i"
-               :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
-            <span class="c-idx">{{ i + 1 }}/{{ rp.status.combos.total }}</span>
-            <span class="c-kw">「{{ c.kw }}」</span>
-            <span class="c-city">@{{ c.city || '全国' }}</span>
-            <span class="c-mark">{{ c.state === 'done' ? '✓' : (c.state === 'running' ? '▶' : '·') }}</span>
-          </div>
+      <!-- 品牌与平台切换之间的竖线分隔 -->
+      <span class="topbar-divider"></span>
+      <!-- 平台切换:纯圆角徽标按钮(无文字,名称见悬停提示),悬停放大、选中保持放大。
+           徽标直接用 @2x 高清源图:30px 盒 + transform 放大后仍锐利(1x 源图放大即发虚);
+           右上角指示灯 = 运行绿 / 空闲灰 / 最近任务异常红 -->
+      <div class="top-plats">
+        <div v-for="p in platforms" :key="p.id" class="top-plat" :title="p.name"
+             :class="{ active: grab.platform === p.id,
+                       'st-done': taskStatusOf(p.id) === 'done',
+                       'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
+          <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
+          <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
+            <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img2x || platformLogo(p.id).img"
+                 alt="" @error="onLogoError(p.id)">
+            <template v-else>{{ platformLogo(p.id).text }}</template>
+          </span>
         </div>
       </div>
     </div>
@@ -578,8 +565,8 @@
           <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
         </div>
 
-        <!-- 模式内容区按内容自适应高度(原固定 232px 是为贴底任务卡保持间距,
-             任务卡改紧随抓取卡后不再需要;标签区仍各自限高内部滚动) -->
+        <!-- 模式内容区按内容自适应高度(标签区各自限高内部滚动):
+             切换模式时抓取卡高度会变化,贴底的最近任务卡位置不变、仅上方间隔变化 -->
         <template v-if="grab.mode === 'quick'">
           <div class="field-label">岗位设置</div>
           <div class="table-combo" style="width:100%">
@@ -644,8 +631,37 @@
         </el-tooltip>
       </div>
 
+      <!-- 运行状态:多平台并发同屏,位于「最近任务」卡片上方(全空闲时整卡隐藏,不占位)。
+           每平台一段:上行 圆点+平台名+计数徽章(跳过徽章悬停显示原因明细),
+           下行 进度单行省略;悬停平台段向下浮层展开任务组合(词条×城市) -->
+      <div class="card status-card" v-if="runningPlatforms.length">
+        <div class="card-title">运行状态</div>
+        <div class="ts-item" v-for="rp in runningPlatforms" :key="rp.pid"
+             @mouseenter="comboHover = rp.pid" @mouseleave="comboHover = null">
+          <div class="ts-line">
+            <span class="dot on"></span>
+            <span class="ts-name">{{ platformOf(rp.pid) }}</span>
+            <span class="ts-counters" v-if="rp.status.counters">
+              <span class="tsc">发现 {{ rp.status.counters.found || 0 }}</span>
+              <span class="tsc save">入库 {{ rp.status.counters.saved || 0 }}</span>
+              <span class="tsc skip" :title="skipTipOf(rp.pid)">跳过 {{ rp.status.counters.skipped || 0 }}</span>
+            </span>
+          </div>
+          <div class="ts-progress" :title="rp.status.progress">{{ rp.status.progress || '正在准备…' }}</div>
+          <div class="combo-pop" v-if="rp.status.combos && comboHover === rp.pid">
+            <div class="combo-line" v-for="(c, i) in rp.status.combos.items" :key="i"
+                 :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
+              <span class="c-idx">{{ i + 1 }}/{{ rp.status.combos.total }}</span>
+              <span class="c-kw">「{{ c.kw }}」</span>
+              <span class="c-city">@{{ c.city || '全国' }}</span>
+              <span class="c-mark">{{ c.state === 'done' ? '✓' : (c.state === 'running' ? '▶' : '·') }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 最近任务:全平台混排(行首平台徽标),固定 5 行高度、行区独立滚动、
-           触底自动加载更早记录——高度不随左栏内容变化 -->
+           触底自动加载更早记录——margin-top:auto 贴左栏底边,运行状态卡恰好出现在其上方 -->
       <div class="card task-card">
         <div class="card-title">最近任务<span class="aux">全平台 · 下滚加载更早</span></div>
         <div class="task-scroll" @scroll="onTaskListScroll">

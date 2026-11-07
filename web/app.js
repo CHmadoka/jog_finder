@@ -9,17 +9,18 @@ const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vu
 const { ElMessage, ElMessageBox } = ElementPlus;
 
 const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎聘" };
-// 平台徽标(左栏平台按钮):三家官方应用图标(1024px 无损源图)已放进 web/
+// 平台徽标(顶栏切换按钮/任务行小徽标):三家官方应用图标(1024px 无损源图)已放进 web/
 // (经 /assets 静态映射,离线可用);图片缺失/加载失败时回退到品牌色文字徽标。
 // 1x/2x/3x 三档文件由 scripts/gen_logos.py 按 .plogo 的 CSS 尺寸生成,
-// 浏览器按屏幕像素比直接挑像素对齐的那张,不做运行时缩放(不会发虚)
+// 浏览器按屏幕像素比直接挑像素对齐的那张,不做运行时缩放(不会发虚)。
+// img2x:顶栏专用 —— 按钮悬停/选中会 transform 放大,固定用 2x 源图保证放大后仍锐利
 function logoSrcset(base) {
   return [`${base}.png 1x`, `${base}@2x.png 2x`, `${base}@3x.png 3x`].join(", ");
 }
 const PLATFORM_LOGOS = {
-  boss: { img: "/assets/logo_boss.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", color: "#00a6a7" },
-  job51: { img: "/assets/logo_51job.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", color: "#ff6000" },
-  liepin: { img: "/assets/logo_liepin.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", color: "#d8262c" },
+  boss: { img: "/assets/logo_boss.png", img2x: "/assets/logo_boss@2x.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", color: "#00a6a7" },
+  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", color: "#ff6000" },
+  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", color: "#d8262c" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
@@ -188,6 +189,8 @@ const app = createApp({
       const t = tables.value.find((x) => x.id === (grab.table_id || 1));
       return t ? t.name : "默认表";
     });
+    // 顶栏品牌主题色背景:当前选中平台的品牌色(未知平台回退空 → 白底)
+    const brandBg = computed(() => (PLATFORM_LOGOS[grab.platform] || {}).color || "");
 
     // 任务组合进度:顶部状态段悬停展开(浮层),comboHover 记录展开的平台 id
     const comboHover = ref(null);
@@ -979,7 +982,7 @@ const app = createApp({
       comboHover,
       gearForm, filterForm, tableForm,
       currentStatus, running, canStart, startHint,
-      sortState, skipTipOf, currentTableName,
+      sortState, skipTipOf, currentTableName, brandBg,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       kwCount, cityLabel, runningPlatforms,
       platformLogo, onLogoError,
