@@ -286,6 +286,14 @@
     /* header 区(标题+置顶操作按钮):占满左侧,不随内容滚动 */
     .drawer-head { flex: 1; min-width: 0; }
     .drawer-actions { margin-top: 8px; display: flex; gap: 10px; }
+    /* 详情抽屉 header:收紧按钮与下边缘的间隔,并强化下边缘分隔线 */
+    .el-drawer__header {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--el-border-color);
+      align-items: flex-start;
+    }
+    .el-drawer__body { padding-top: 14px; }
     /* 关联/扩展词条标签内的关联图标 */
     .hit-ico { vertical-align: -3px; margin-right: 3px; }
     /* 详情抽屉基础信息表格文本可选中复制 */
@@ -685,8 +693,8 @@
         <span v-if="currentJob && highlightedTitle" class="drawer-title" v-html="highlightedTitle"></span>
         <span v-else>岗位详情</span>
         <div class="drawer-actions" v-if="currentJob">
-          <el-button type="primary" size="small" @click="openJob(currentJob)">在已登录浏览器打开</el-button>
-          <el-button type="danger" plain size="small" @click="delJob(currentJob)">删除</el-button>
+          <el-button type="primary" @click="openJob(currentJob)">在已登录浏览器打开</el-button>
+          <el-button type="danger" plain @click="delJob(currentJob)">删除</el-button>
         </div>
       </div>
     </template>
