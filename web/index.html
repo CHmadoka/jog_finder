@@ -63,11 +63,11 @@
     /* ---------- 布局 ---------- */
     .layout { display: flex; height: calc(100vh - 56px); }
     .side {
-      width: 396px; flex-shrink: 0; padding: 14px;
+      width: 396px; flex-shrink: 0; padding: 10px 12px;
       /* 滚动条常驻:内容高度随平台/任务状态变化(如「最近任务」卡片空/非空差 8px),
          若用 auto,高度恰在临界点时滚动条会忽隐忽现,内容区宽度跳 15px,卡片看起来"变宽" */
       overflow-y: scroll; scrollbar-gutter: stable;
-      display: flex; flex-direction: column; gap: 12px;
+      display: flex; flex-direction: column; gap: 8px;
     }
     .main { flex: 1; min-width: 0; padding: 14px 14px 14px 0; display: flex; flex-direction: column; }
 
@@ -80,11 +80,15 @@
       justify-content: space-between; margin-bottom: 12px;
     }
     .card-title .aux { font-size: 12px; font-weight: 400; }
+    /* 左栏纵向空间治理:保证固定 5 行的「最近任务」卡片在常规视口贴底完整可见 */
+    .side .card { padding: 10px 12px; }
+    .side .card-title { margin-bottom: 8px; }
+    .side .field-label { margin: 7px 0 3px; }
 
     /* ---------- 平台选择 ---------- */
     .platform-switch { display: flex; gap: 8px; }
     .psw-item {
-      flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px;
+      flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 6px 4px;
       display: flex; align-items: center; justify-content: center; gap: 6px;
       text-align: center; cursor: pointer; font-size: 13px; color: var(--text2);
       transition: border-color .15s, background-color .15s, color .15s;
@@ -133,9 +137,9 @@
     /* ---------- 已存条件摘要 ---------- */
     .cond-summary {
       background: #f7f8fc; border: 1px solid var(--border); border-radius: 8px;
-      padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--text2); line-height: 1.9;
-      /* 限高约 4 行:城市/行业标签很多时不再撑高左栏,超出内部滚动 */
-      max-height: 100px; overflow-y: auto; scrollbar-gutter: stable;
+      padding: 8px 10px; margin-top: 6px; font-size: 12px; color: var(--text2); line-height: 1.9;
+      /* 限高约 3 行:城市/行业标签很多时不再撑高左栏,超出内部滚动 */
+      max-height: 72px; overflow-y: auto; scrollbar-gutter: stable;
     }
     .cond-summary .cs-k { color: var(--text3); display: inline-block; width: 44px; }
     .cond-summary .el-tag { margin-right: 4px; }
@@ -236,9 +240,14 @@
     .dot.on { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); animation: blink 1.2s infinite; }
     .dot.off { background: #cbd2dc; }
     @keyframes blink { 50% { opacity: .4; } }
-    .progress-text { font-size: 12px; color: var(--text2); line-height: 1.7; word-break: break-all; margin-top: 8px; }
-    /* 任务组合进度:当前组合单行;悬停向下展开全部分组(词条/城市分行显示) */
-    .combo-box { margin-top: 6px; font-size: 12px; line-height: 1.9; }
+    .progress-text {
+      font-size: 12px; color: var(--text2); line-height: 1.6; word-break: break-all; margin-top: 6px;
+      /* 限 2 行:长进度文本不撑高左栏 */
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    /* 任务组合进度:当前组合单行;悬停向下展开全部分组(词条/城市分行显示),
+       展开时限高滚动(词条×城市多时不再无限撑高左栏) */
+    .combo-box { margin-top: 6px; font-size: 12px; line-height: 1.9; max-height: 150px; overflow-y: auto; scrollbar-gutter: stable; }
     .combo-line { display: flex; gap: 6px; align-items: center; padding: 1px 0; color: var(--text2); }
     .combo-line .c-idx { color: var(--text3); flex-shrink: 0; min-width: 36px; font-variant-numeric: tabular-nums; }
     .combo-line .c-kw { color: var(--el-text-color-primary); }
@@ -257,17 +266,18 @@
     .counter .lbl { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
     /* ---------- 任务历史 ---------- */
-    /* 卡片固定高度(标题 + 恰好 5 行任务行):不参与左栏 flex 拉伸,
-       左栏内容(城市/词条/条件摘要)再多也不影响它 */
-    .task-card { display: flex; flex-direction: column; flex: none; }
-    /* 恰好 5 行:tag 24px + 行 padding 12px = 36px/行,前 4 行另有 1px 虚线分隔
-       → 4×37 + 36 = 184px;内容超出在行区内部滚动 */
+    /* 卡片固定:不参与左栏 flex 拉伸,margin-top:auto 把卡片推到左栏底部贴边
+       (空间不足时随左栏整体滚动,依然完整可见) */
+    .task-card { display: flex; flex-direction: column; flex: none; margin-top: auto; }
+    /* 行高锁定 36px(含 1px 分隔线,内容垂直居中):5 行 = 180px 数学恒等,
+       不依赖 el-tag 的实际渲染高度 */
     .task-scroll {
-      flex: none; height: 184px; overflow-y: auto; scrollbar-gutter: stable;
+      flex: none; height: 180px; overflow-y: auto; scrollbar-gutter: stable;
       margin: 0 -6px; padding: 0 6px;
     }
     .task-row {
-      display: flex; align-items: center; gap: 8px; padding: 6px 6px; font-size: 12px;
+      height: 36px; box-sizing: border-box;
+      display: flex; align-items: center; gap: 8px; padding: 0 6px; font-size: 12px;
       border-bottom: 1px dashed #eef0f6; cursor: pointer; border-radius: 6px;
       transition: background .12s;
     }
@@ -514,7 +524,7 @@
         </div>
 
         <!-- 存入目标表:抓取结果固定写入该表,与右栏浏览的工作表筛选分离 -->
-        <div class="field-label" style="margin-top:12px;">存入数据表</div>
+        <div class="field-label" style="margin-top:8px;">存入数据表</div>
         <div class="table-combo" style="width:100%">
           <el-select v-model="grab.table_id" style="flex:1; min-width:0">
             <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
@@ -524,7 +534,7 @@
           </el-tooltip>
         </div>
 
-        <div class="seg" style="margin-top:12px;">
+        <div class="seg" style="margin-top:8px;">
           <div class="seg-item" :class="{ active: grab.mode === 'quick' }" @click="grab.mode = 'quick'">快速抓取</div>
           <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
         </div>
@@ -598,7 +608,7 @@
           </el-input>
         </div>
 
-        <el-button :type="running ? 'warning' : 'primary'" size="large" style="width:100%; margin-top:14px;"
+        <el-button :type="running ? 'warning' : 'primary'" size="large" style="width:100%; margin-top:10px;"
                    :disabled="!running && !canStart" :loading="starting"
                    @click="running ? stopTask() : startTask()">
           {{ running ? '停止抓取' : '开始抓取' }}
