@@ -385,8 +385,10 @@ class BossPlatform(BasePlatform):
         if params:
             u = u + ("&" if "?" in u else "?") + "&".join(params)
 
-        # 详情页节奏:约 1s/个(可配置),轻微抖动
-        await asyncio.sleep(random.uniform(0.8, max(0.8, config.DETAIL_DELAY)))
+        # 详情页节奏:随机 2~8 秒/个(可配置)。固定约 1s 的均匀高频访问
+        # 是 Boss 限流(code=32 访问受限)的主因,拉大并随机化间隔模拟人工浏览
+        lo, hi = config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX
+        await asyncio.sleep(random.uniform(lo, max(lo, hi)))
         # 用户已请求停止:不再发起任何导航(停止指令即时生效)
         if should_stop is not None and should_stop():
             return

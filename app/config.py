@@ -30,7 +30,8 @@ class Config:
     # 抓取行为
     DELAY_MIN: float = float(os.getenv("DELAY_MIN", "3") or 3)
     DELAY_MAX: float = float(os.getenv("DELAY_MAX", "8") or 8)
-    DETAIL_DELAY: float = float(os.getenv("DETAIL_DELAY", "1") or 1)  # 详情页间隔(秒)
+    DETAIL_DELAY_MIN: float = float(os.getenv("DETAIL_DELAY_MIN", "2") or 2)  # 详情页间隔下限(秒)
+    DETAIL_DELAY_MAX: float = float(os.getenv("DETAIL_DELAY_MAX", "8") or 8)  # 详情页间隔上限(秒)
     MAX_PAGES_PER_TASK: int = _env_int("MAX_PAGES_PER_TASK", 10)
     HR_ACTIVE_DAYS: int = _env_int("HR_ACTIVE_DAYS", 7)
     JOB_PUBLISH_DAYS: int = _env_int("JOB_PUBLISH_DAYS", 7)
