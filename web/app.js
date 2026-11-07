@@ -9,12 +9,12 @@ const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vu
 const { ElMessage, ElMessageBox } = ElementPlus;
 
 const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎聘" };
-// 平台徽标(左栏平台按钮):官方 favicon 已下载到 web/assets/(离线可用);
-// img 缺失时回退到品牌色文字徽标
+// 平台徽标(左栏平台按钮):三家官方应用图标(512px 源图转 128px PNG)已放进
+// web/(经 /assets 静态映射,离线可用);图片缺失/加载失败时回退到品牌色文字徽标
 const PLATFORM_LOGOS = {
-  boss: { img: "/assets/logo_boss.ico", text: "B", color: "#00a6a7" },
-  job51: { img: "/assets/logo_51job.ico", text: "51", color: "#ff6000" },
-  liepin: { img: "/assets/logo_liepin.ico", text: "猎", color: "#d8262c" },
+  boss: { img: "/assets/logo_boss.png", text: "B", color: "#00a6a7" },
+  job51: { img: "/assets/logo_51job.png", text: "51", color: "#ff6000" },
+  liepin: { img: "/assets/logo_liepin.png", text: "猎", color: "#d8262c" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
@@ -219,8 +219,16 @@ const app = createApp({
       return (platforms.value.find((p) => p.id === pid) || {}).name
         || PLATFORM_NAMES[pid] || pid;
     }
+    const logoBroken = reactive({});   // 徽标图片加载失败过的平台
     function platformLogo(pid) {
-      return PLATFORM_LOGOS[pid] || { text: (pid || "?").slice(0, 1).toUpperCase(), color: "#8a94a6" };
+      const cfg = PLATFORM_LOGOS[pid];
+      if (!cfg) return { img: "", text: (pid || "?").slice(0, 1).toUpperCase(), color: "#8a94a6" };
+      // 图片 404/解码失败时降级为文字徽标,避免出现裂图占位
+      if (logoBroken[pid]) return { img: "", text: cfg.text, color: cfg.color };
+      return cfg;
+    }
+    function onLogoError(pid) {
+      logoBroken[pid] = true;
     }
     function gearName(gid) {
       return (gears.value.find((g) => g.id === gid) || {}).name || "设置#" + gid;
@@ -926,7 +934,7 @@ const app = createApp({
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
-      platformLogo,
+      platformLogo, onLogoError,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
       viewTaskJobs, clearTaskFilter, onTaskPick, openTaskDialog, delTask,
