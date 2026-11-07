@@ -277,8 +277,20 @@
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 600;
     }
-    /* 抽屉标题(标题词条同样高亮) */
-    .drawer-title { font-size: 16px; font-weight: 600; line-height: 1.5; word-break: break-all; }
+    /* 抽屉标题(标题词条同样高亮)+ 左侧渐变竖条强调 */
+    .drawer-title {
+      display: inline-block;
+      position: relative;
+      padding-left: 11px;
+      font-size: 16px; font-weight: 600; line-height: 1.5; word-break: break-all;
+    }
+    .drawer-title::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 4px; bottom: 2px;
+      width: 4px; border-radius: 2px;
+      background: linear-gradient(180deg, var(--el-color-primary), var(--el-color-primary-light-5));
+    }
     .drawer-title mark {
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 700;
@@ -286,12 +298,25 @@
     /* header 区(标题+置顶操作按钮):占满左侧,不随内容滚动 */
     .drawer-head { flex: 1; min-width: 0; }
     .drawer-actions { margin-top: 8px; display: flex; gap: 10px; }
-    /* 详情抽屉 header:收紧按钮与下边缘的间隔,并强化下边缘分隔线 */
+    /* 详情抽屉 header:现代感边缘——两端淡出的渐变分隔线替代实线边框 */
     .el-drawer__header {
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--el-border-color);
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      position: relative;
       align-items: flex-start;
+    }
+    .el-drawer__header::after {
+      content: "";
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 1px;
+      background: linear-gradient(
+        90deg,
+        var(--el-color-primary-light-7) 0%,
+        var(--el-border-color) 30%,
+        var(--el-border-color-lighter) 65%,
+        transparent 100%
+      );
     }
     .el-drawer__body { padding-top: 14px; }
     /* 关联/扩展词条标签内的关联图标 */
