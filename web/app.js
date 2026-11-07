@@ -9,11 +9,12 @@ const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vu
 const { ElMessage, ElMessageBox } = ElementPlus;
 
 const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎聘" };
-// 平台品牌徽标(左栏平台按钮):品牌近似色 + 代表字,纯 CSS 不依赖外部图片
+// 平台徽标(左栏平台按钮):官方 favicon 已下载到 web/assets/(离线可用);
+// img 缺失时回退到品牌色文字徽标
 const PLATFORM_LOGOS = {
-  boss: { text: "B", color: "#00a6a7" },     // Boss直聘:品牌青绿
-  job51: { text: "51", color: "#ff6000" },   // 前程无忧:品牌橙
-  liepin: { text: "猎", color: "#d8262c" },  // 猎聘:品牌红
+  boss: { img: "/assets/logo_boss.ico", text: "B", color: "#00a6a7" },
+  job51: { img: "/assets/logo_51job.ico", text: "51", color: "#ff6000" },
+  liepin: { img: "/assets/logo_liepin.ico", text: "猎", color: "#d8262c" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;

@@ -93,13 +93,14 @@
       background: var(--el-color-primary-light-9);
       /* 不变字重:避免选中时文字加粗引起宽度变化/抖动 */
     }
-    /* 平台品牌徽标:品牌色圆角块 + 白字(不依赖外部 logo 资源) */
+    /* 平台徽标:官方 logo 图(本地 favicon);img 缺失回退品牌色文字块 */
     .plogo {
       width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
       display: inline-flex; align-items: center; justify-content: center;
       color: #fff; font-size: 10px; font-weight: 700; letter-spacing: -.5px;
-      line-height: 1;
+      line-height: 1; overflow: hidden;
     }
+    .plogo img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .psw-item .badge {
       position: absolute; top: -5px; right: -5px; width: 9px; height: 9px; border-radius: 50%;
       border: 2px solid #fff;
@@ -460,7 +461,10 @@
           <div v-for="p in platforms" :key="p.id" class="psw-item"
                :class="{ active: grab.platform === p.id }" @click="switchPlatform(p.id)">
             <span class="badge" :class="isRunning(p.id) ? 'on' : 'off'"></span>
-            <span class="plogo" :style="{ background: platformLogo(p.id).color }">{{ platformLogo(p.id).text }}</span>
+            <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).color }">
+              <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img" alt="">
+              <template v-else>{{ platformLogo(p.id).text }}</template>
+            </span>
             {{ p.name }}
           </div>
         </div>
