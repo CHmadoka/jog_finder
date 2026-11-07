@@ -15,15 +15,15 @@ const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎
 // 浏览器按屏幕像素比直接挑像素对齐的那张,不做运行时缩放(不会发虚)。
 // img2x:顶栏专用 —— 按钮悬停/选中会 transform 放大,固定用 2x 源图保证放大后仍锐利
 // bg:平台品牌主题色 —— 顶栏品牌背景与文字徽标回退底色共用。
-// Boss 取徽标图块实测青绿;前程无忧/猎聘沿用经典品牌纯色(橙/红,二者明显区分,
-// 渐变铺满顶栏观感像渲染异常且橙色端与猎聘橙撞色,弃用)
+// 配色以各家官方应用图标图块的实际观感为准:前程无忧图块为橙→红渐变(整体偏红)、
+// 猎聘图块为橙色边框——先前按旧印象把两家的颜色配反了(51job橙/猎聘红),已对调
 function logoSrcset(base) {
   return [`${base}.png 1x`, `${base}@2x.png 2x`, `${base}@3x.png 3x`].join(", ");
 }
 const PLATFORM_LOGOS = {
   boss: { img: "/assets/logo_boss.png", img2x: "/assets/logo_boss@2x.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", bg: "#15b3b3" },
-  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", bg: "#ff6000" },
-  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", bg: "#d8262c" },
+  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", bg: "#d8262c" },
+  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", bg: "#ff6000" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
