@@ -84,12 +84,14 @@
       flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px;
       display: flex; align-items: center; justify-content: center; gap: 6px;
       text-align: center; cursor: pointer; font-size: 13px; color: var(--text2);
-      transition: all .15s; position: relative; user-select: none;
+      transition: border-color .15s, background-color .15s, color .15s;
+      position: relative; user-select: none;
     }
     .psw-item:hover { border-color: var(--el-color-primary-light-5); color: var(--text); }
     .psw-item.active {
       border-color: var(--el-color-primary); color: var(--el-color-primary);
-      background: var(--el-color-primary-light-9); font-weight: 600;
+      background: var(--el-color-primary-light-9);
+      /* 不变字重:避免选中时文字加粗引起宽度变化/抖动 */
     }
     /* 平台品牌徽标:品牌色圆角块 + 白字(不依赖外部 logo 资源) */
     .plogo {
