@@ -1,6 +1,7 @@
 """SQLite 引擎与会话管理。"""
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 from sqlalchemy import create_engine, event
@@ -42,6 +43,8 @@ _NEW_COLUMNS = {
         # 抓取来源外键与数据表归属(SQLite 的 ALTER 限制:带 REFERENCES 的新列默认值必须为 NULL)
         ("crawl_task_id", "INTEGER"),
         ("table_id", "INTEGER"),
+        # 搜索来源词条(该岗位由哪个词条的搜索结果中抓出;详情页命中高亮用)
+        ("source_keyword", "VARCHAR(100) DEFAULT ''"),
     ],
     "crawl_task": [
         ("keywords", "TEXT DEFAULT ''"),
@@ -112,6 +115,22 @@ def _migrate_columns() -> None:
             "city = ifnull(json_extract(filter_snapshot, '$.city'), '') "
             "WHERE ifnull(keywords, '') = '' AND filter_snapshot IS NOT NULL"
         ))
+        # 一次性:回填旧岗位的搜索来源词条——取标题/描述中命中的第一个词条
+        # (确定性依据,非猜测;文本无命中的留空,由新任务实时记录)。
+        # user_version 守卫防重复全表扫描。
+        if ver < 3:
+            rows = conn.execute(text(
+                "SELECT id, title, description, keyword FROM job "
+                "WHERE ifnull(source_keyword, '') = '' AND ifnull(keyword, '') != ''"
+            )).mappings().all()
+            for r in rows:
+                kws = [k.strip() for k in re.split(r"[、,，|;；]", r["keyword"] or "") if k.strip()]
+                hay = f"{(r['title'] or '').lower()}\n{(r['description'] or '').lower()}"
+                hit = next((k for k in kws if k.lower() in hay), "")
+                if hit:
+                    conn.execute(text("UPDATE job SET source_keyword = :k WHERE id = :i"),
+                                 {"k": hit[:100], "i": r["id"]})
+            conn.execute(text("PRAGMA user_version = 3"))
         conn.commit()
 
 

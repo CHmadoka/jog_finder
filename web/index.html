@@ -684,8 +684,8 @@
         <el-tag v-if="currentJob.fit === true" type="success" effect="light">契合</el-tag>
         <el-tag v-else-if="currentJob.fit === false" type="danger" effect="light">不符</el-tag>
         <el-tag effect="plain">{{ platformOf(currentJob.platform) }}</el-tag>
-        <el-tag v-for="k in hitKeywords" :key="'hit-' + k" type="warning" effect="light"
-                title="该词条出现在本岗位标题或描述中">{{ k }}</el-tag>
+        <el-tag v-for="h in hitKeywords" :key="'hit-' + h.kw" type="warning" effect="light"
+                :title="h.tip">{{ h.kw }}</el-tag>
       </div>
       <el-descriptions :column="2" size="small" border>
         <el-descriptions-item label="公司">{{ currentJob.company }}</el-descriptions-item>

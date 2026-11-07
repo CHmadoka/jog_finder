@@ -119,7 +119,8 @@ class UpsertResult(NamedTuple):
 
 
 def _db_update_existing(
-    platform: str, job_id: str, draft: JobDraft, task_id: int | None = None
+    platform: str, job_id: str, draft: JobDraft, task_id: int | None = None,
+    source_kw: str = "",
 ) -> UpsertResult:
     """重复岗位:只更新有变化的字段(活跃估算/薪资/行业等),不重复入库。
 
@@ -159,6 +160,10 @@ def _db_update_existing(
         # HR 在线状态是实时布尔,直接覆盖
         if bool(row.hr_online) != bool(draft.hr_online):
             row.hr_online = bool(draft.hr_online)
+            changed += 1
+        # 来源词条:岗位被其它词条/任务再次发现时对齐"最后更新"语义
+        if source_kw and row.source_keyword != source_kw:
+            row.source_keyword = source_kw
             changed += 1
         if changed:
             if task_id:
@@ -276,6 +281,7 @@ def _db_add_events(
 def _db_insert_job(
     plat_id: str, draft: JobDraft, result, keyword: str, city: str,
     task_id: int | None = None, table_id: int | None = None,
+    source_kw: str = "",
 ) -> None:
     with SessionLocal() as db:
         job = Job(
@@ -305,6 +311,7 @@ def _db_insert_job(
             url=draft.url,
             gear_id=None,
             keyword=keyword,
+            source_keyword=source_kw,
             crawl_task_id=task_id,
             table_id=table_id or 1,
             remark=result.remark,
@@ -691,7 +698,9 @@ class Scheduler:
                     seen_ids.add(draft.platform_job_id)
                     found += 1
                     counters.update(found=found)
-                    outcome = await self._process_one(plat, draft, snap, progress, task_id, bump, cur_city)
+                    outcome = await self._process_one(
+                        plat, draft, snap, progress, task_id, bump, cur_city, kw
+                    )
                     if outcome == "saved":
                         saved += 1
                     else:
@@ -752,11 +761,13 @@ class Scheduler:
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)
 
     async def _process_one(
-        self, plat, draft: JobDraft, snap: dict, progress, task_id: int, bump, city: str = ""
+        self, plat, draft: JobDraft, snap: dict, progress, task_id: int, bump,
+        city: str = "", kw: str = "",
     ) -> str:
         """查重 → 评估 → 入库。返回 'saved' 或 'skipped';bump 记录跳过原因。
 
         city: 本次检索的城市(多选循环中的当前城市),作为岗位城市的入库兜底。
+        kw: 本次检索的词条(搜索来源),入库到 source_keyword 供详情页命中高亮。
         """
         # 适配器解析层警告(字段缺失/平台文本可能变化)持久化到异常面板(带岗位链接)
         warns = draft.raw.pop("_warnings", None) or []
@@ -782,7 +793,7 @@ class Scheduler:
             bump("被平台拦截")
             return "skipped"
         up = await asyncio.to_thread(
-            _db_update_existing, plat.id, draft.platform_job_id, draft, task_id
+            _db_update_existing, plat.id, draft.platform_job_id, draft, task_id, kw
         )
         if up.exists:
             # 已存在:仅更新有变化的字段,不重复入库(需求:比对是否已存在)
@@ -803,7 +814,7 @@ class Scheduler:
 
         await asyncio.to_thread(
             _db_insert_job, plat.id, draft, result, snap.get("keyword", ""), city,
-            task_id, snap.get("table_id"),
+            task_id, snap.get("table_id"), kw,
         )
         note = f"(备注: {result.remark})" if result.remark else ""
         progress(f"入库「{draft.title}」@{draft.company}{note}")

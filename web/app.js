@@ -287,13 +287,26 @@ const app = createApp({
       const raw = (currentJob.value || {}).keyword || "";
       return [...new Set(raw.split(/[、,，|;；]+/).map((s) => s.trim()).filter(Boolean))];
     });
-    // 命中词条:出现在标题或描述中的词条(标签展示;与描述内 <mark> 同源)。
-    // 大小写不敏感——与入库匹配规则一致(evaluate_job 用 lower() 比较标题)
+    // 命中词条 = 来源词条(source_keyword,该岗位由哪个词条的搜索结果中抓出,
+    // 旧数据无此值则回退纯文本命中) ∪ 文本子串命中的词条。
+    // 大小写不敏感——与入库匹配规则一致(evaluate_job 用 lower() 比较标题,
+    // 描述同样全小写比较,此前描述未小写导致英文词条在标签中漏判)。
     const hitKeywords = computed(() => {
       const j = currentJob.value || {};
-      if (!jobKeywords.value.length) return [];
-      const hay = `${(j.title || "").toLowerCase()}\n${j.description || ""}`;
-      return jobKeywords.value.filter((k) => hay.includes(k.toLowerCase()));
+      const out = [];
+      const src = (j.source_keyword || "").trim();
+      // 来源词条即使文本未出现也算匹配(如描述换了说法但确由该词条搜出)
+      if (src) out.push({ kw: src, tip: "来源词条:本岗位由该词条的搜索结果中抓取" });
+      if (jobKeywords.value.length) {
+        const hay = `${(j.title || "").toLowerCase()}\n${(j.description || "").toLowerCase()}`;
+        for (const k of jobKeywords.value) {
+          if (k === src) continue;   // 来源词条已列,避免重复标签
+          if (hay.includes(k.toLowerCase())) {
+            out.push({ kw: k, tip: "出现在本岗位标题或描述中" });
+          }
+        }
+      }
+      return out;
     });
     // 通用高亮:文本先 HTML 转义(防 XSS),再按词条(长词优先,避免
     // "文员"截胡"仓库文员")大小写不敏感地替换为 <mark>

@@ -86,6 +86,9 @@ class Job(Base):
     url = Column(String(500), default="")
     gear_id = Column(Integer, nullable=True, comment="命中的档位")
     keyword = Column(String(200), default="", comment="抓取时使用的搜索词")
+    source_keyword = Column(
+        String(100), default="", comment="搜索来源词条(该岗位由哪个词条的搜索结果中抓出)",
+    )
     crawl_task_id = Column(
         Integer, ForeignKey("crawl_task.id"), nullable=True,
         comment="产生/最后更新本岗位的抓取任务(外键)",

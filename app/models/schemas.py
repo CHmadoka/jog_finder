@@ -83,6 +83,7 @@ class JobOut(BaseModel):
     url: str
     gear_id: Optional[int] = None
     keyword: str
+    source_keyword: str = ""                 # 搜索来源词条(由哪个词条的搜索结果中抓出)
     industry: str = ""
     company_stage: str = ""
     company_scale: str = ""
