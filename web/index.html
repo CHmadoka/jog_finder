@@ -472,12 +472,11 @@
     .event-fab {
       background: #fff; color: #dc2626;
       border-radius: 20px; padding: 8px 14px; font-size: 12px; cursor: pointer;
-      box-shadow: 0 4px 14px rgba(220, 38, 38, .12);
       display: flex; align-items: center; gap: 6px; font-weight: 600;
       transition: box-shadow .15s;
     }
-    /* 悬停不做位移偏移,仅加深阴影表达浮起(与品牌区/状态区胶囊同款无边框风格) */
-    .event-fab:hover { box-shadow: 0 6px 18px rgba(220, 38, 38, .25); }
+    /* 阴影只在悬停时出现(非常驻边缘阴影) */
+    .event-fab:hover { box-shadow: 0 6px 18px rgba(220, 38, 38, .2); }
     .event-fab .cnt {
       background: #dc2626; color: #fff; border-radius: 10px;
       padding: 1px 8px; font-weight: 700; font-size: 11px;
