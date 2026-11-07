@@ -509,6 +509,14 @@
         </el-tooltip>
       </div>
 
+      <!-- 任务过滤提示:从任务详情/岗位详情跳转而来,点 × 返回常规筛选 -->
+      <div v-if="query.task_id" style="display:flex; align-items:center; gap:8px; margin:4px 0 2px;">
+        <el-tag type="warning" effect="light" closable @close="clearTaskFilter">
+          任务 #{{ query.task_id }} 的关联岗位
+        </el-tag>
+        <el-text type="info" size="small">按抓取任务过滤(已忽略工作表筛选)</el-text>
+      </div>
+
       <!-- 统计条 -->
       <div class="stat-bar">
         <div class="stat-chip" :class="{ active: !query.fit }" @click="setFit('')">
@@ -629,6 +637,14 @@
         </el-descriptions-item>
         <el-descriptions-item label="发布时间">{{ fmtTime(currentJob.published_at) }}</el-descriptions-item>
         <el-descriptions-item label="最后更新时间">{{ fmtTime(currentJob.updated_at) }}</el-descriptions-item>
+        <el-descriptions-item label="来源任务" :span="2">
+          <el-link v-if="currentJob.crawl_task_id" type="primary"
+                   :title="'点击在右栏按任务 #' + currentJob.crawl_task_id + ' 过滤'"
+                   @click="viewTaskJobs(currentJob.crawl_task_id, currentJob.platform)">
+            任务 #{{ currentJob.crawl_task_id }}(点击查看该任务关联的全部岗位)
+          </el-link>
+          <span v-else style="color:var(--el-text-color-secondary)">—(早期数据或补全任务,无抓取任务记录)</span>
+        </el-descriptions-item>
       </el-descriptions>
       <div class="block-title">备注（不符合原因）</div>
       <el-text type="warning" v-if="currentJob.remark">{{ currentJob.remark }}</el-text>
@@ -679,6 +695,11 @@
       <el-text type="info">{{ detailTask.message || '—' }}</el-text>
       <div class="block-title">条件快照</div>
       <div class="drawer-desc" style="font-family: Consolas, monospace; font-size: 12px;">{{ JSON.stringify(detailTask.filter_snapshot, null, 2) }}</div>
+      <div style="margin-top:14px;">
+        <el-button type="primary" plain @click="viewTaskJobs(detailTask.id, detailTask.platform)">
+          查看关联岗位(在右栏按任务 #{{ detailTask.id }} 过滤)
+        </el-button>
+      </div>
     </template>
   </el-dialog>
 

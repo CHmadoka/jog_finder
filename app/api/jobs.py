@@ -30,8 +30,14 @@ def _filtered_query(
     q: str | None,
     hr_online: int | None = None,
     table_id: int | None = None,
+    task_id: int | None = None,
 ):
-    """按筛选参数构造查询(fit 除外,供统计接口复用)。"""
+    """按筛选参数构造查询(fit 除外,供统计接口复用)。
+
+    task_id: 按抓取任务过滤(crawl_task_id=产生/最后更新该岗位的任务)。
+    任务过滤时忽略 table_id:任务当时存入的数据表未必是当前选中的工作表,
+    "查看某次任务的数据"不应被当前表选择截断。
+    """
     query = db.query(Job)
     if platform:
         query = query.filter(Job.platform == platform)
@@ -43,7 +49,9 @@ def _filtered_query(
         query = query.filter(Job.remark != "")
     if hr_online == 1:
         query = query.filter(Job.hr_online.is_(True))
-    if table_id:
+    if task_id:
+        query = query.filter(Job.crawl_task_id == task_id)
+    elif table_id:
         if table_id == 1:   # 默认表:历史数据 table_id 为空也归属默认表
             query = query.filter(or_(Job.table_id == 1, Job.table_id.is_(None)))
         else:
@@ -87,6 +95,7 @@ def list_jobs(
     hr_online: int | None = None,    # 1=仅看HR当前在线
     q: str | None = None,            # 标题/公司模糊搜索
     table_id: int | None = None,     # 数据表过滤
+    task_id: int | None = None,      # 按抓取任务过滤(任务详情"查看关联岗位")
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("updated", pattern="^(updated|published|hr_active|city|exp_edu)$"),
@@ -98,7 +107,7 @@ def list_jobs(
     if order and sort_by == "updated":
         sort_by = {"first_seen": "updated", "published": "published", "hr_active": "hr_active"}.get(order, "updated")
     query = _filtered_query(
-        db, platform, gear_id, fit, city, has_remark, q, hr_online, table_id
+        db, platform, gear_id, fit, city, has_remark, q, hr_online, table_id, task_id
     )
     if fit == "1":
         query = query.filter(Job.fit.is_(True))
@@ -121,11 +130,12 @@ def jobs_stats(
     city: str | None = None,
     has_remark: int | None = None,
     table_id: int | None = None,
+    task_id: int | None = None,      # 与列表同口径:按抓取任务过滤
     q: str | None = None,
     db: Session = Depends(get_session),
 ):
     """当前筛选口径下的判定统计:总数/契合/不符/未析/HR在线。"""
-    base = _filtered_query(db, platform, gear_id, None, city, has_remark, q, None, table_id)
+    base = _filtered_query(db, platform, gear_id, None, city, has_remark, q, None, table_id, task_id)
     return {
         "total": base.count(),
         "fit": base.filter(Job.fit.is_(True)).count(),

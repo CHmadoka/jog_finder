@@ -114,8 +114,9 @@ const app = createApp({
 
     // 右栏:岗位浏览筛选(默认按最后更新时间倒序)
     // 数据表=当前工作表:既决定看哪个表的岗位,也是新抓岗位的存入目标
+    // task_id: 按抓取任务过滤(任务详情"查看关联岗位"/岗位详情"来源任务"入口)
     const query = reactive({
-      platform: "", table_id: 1, fit: "", q: "",
+      platform: "", table_id: 1, fit: "", q: "", task_id: null,
       sort_by: "updated", sort_order: "desc", page: 1, page_size: 20,
     });
 
@@ -280,7 +281,8 @@ const app = createApp({
       try {
         const params = new URLSearchParams();
         if (query.platform) params.set("platform", query.platform);
-        params.set("table_id", query.table_id || 1);
+        if (query.task_id) params.set("task_id", query.task_id);
+        else params.set("table_id", query.table_id || 1);   // 任务过滤时不按工作表截断
         if (query.fit) params.set("fit", query.fit);
         if (query.q.trim()) params.set("q", query.q.trim());
         params.set("page", query.page);
@@ -297,7 +299,8 @@ const app = createApp({
     async function loadStats() {
       const params = new URLSearchParams();
       if (query.platform) params.set("platform", query.platform);
-      params.set("table_id", query.table_id || 1);
+      if (query.task_id) params.set("task_id", query.task_id);
+      else params.set("table_id", query.table_id || 1);
       if (query.q.trim()) params.set("q", query.q.trim());
       Object.assign(stats, await api("/jobs/stats?" + params.toString()));
     }
@@ -385,10 +388,28 @@ const app = createApp({
       if (grab.platform === pid) return;
       grab.platform = pid;
       grab.filter_id = null;   // 条件按平台隔离
+      query.task_id = null;    // 任务按平台隔离:切平台即退出任务过滤视图
       await loadFilters();
       loadTasks();
     }
     function switchMode(m) { grab.mode = m; }
+
+    // ---------- 任务 ↔ 数据 双向关联 ----------
+    // 从任务详情/岗位详情跳转:右栏按任务过滤(crawl_task_id=产生/最后更新该岗位的任务)
+    function viewTaskJobs(taskId, platform) {
+      if (!taskId) return;
+      query.task_id = taskId;
+      if (platform) query.platform = platform;   // 联动任务所属平台
+      query.page = 1;
+      showDetail.value = false;
+      taskDetailVisible.value = false;
+      reloadJobs();
+    }
+    function clearTaskFilter() {
+      query.task_id = null;
+      query.page = 1;
+      reloadJobs();
+    }
 
     // ---------- 任务控制 ----------
     async function startTask() {
@@ -731,6 +752,7 @@ const app = createApp({
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
+      viewTaskJobs, clearTaskFilter,
       loadJobs,
       onSortChange, toggleSortOrder, onTableChange,
       openGearDialog, resetGearForm, editGear, createGear, saveGear, delGear,
