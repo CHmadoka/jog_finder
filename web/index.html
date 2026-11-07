@@ -672,7 +672,7 @@
         <div class="stat-chip" :class="{ active: !query.fit }" @click="setFit('')">
           <span class="num">{{ stats.total }}</span><span class="lbl">全部岗位</span>
         </div>
-        <div class="stat-chip" :class="{ active: query.fit === '1' }" title="契合判定依赖筛选引擎/LLM" @click="setFit('1')">
+        <div class="stat-chip" :class="{ active: query.fit === '1' }" title="契合/不符由 LLM 判定;未配置 LLM 时该标记为空,这些岗位不计入两侧" @click="setFit('1')">
           <span class="num" style="color:#16a34a">{{ stats.fit }}</span><span class="lbl">契合</span>
         </div>
         <div class="stat-chip" :class="{ active: query.fit === '0' }" @click="setFit('0')">
