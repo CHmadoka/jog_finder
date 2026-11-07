@@ -9,6 +9,12 @@ const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vu
 const { ElMessage, ElMessageBox } = ElementPlus;
 
 const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎聘" };
+// 平台品牌徽标(左栏平台按钮):品牌近似色 + 代表字,纯 CSS 不依赖外部图片
+const PLATFORM_LOGOS = {
+  boss: { text: "B", color: "#00a6a7" },     // Boss直聘:品牌青绿
+  job51: { text: "51", color: "#ff6000" },   // 前程无忧:品牌橙
+  liepin: { text: "猎", color: "#d8262c" },  // 猎聘:品牌红
+};
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
 const LinkIcon = ElementPlusIconsVue.Link;
@@ -211,6 +217,9 @@ const app = createApp({
     function platformOf(pid) {
       return (platforms.value.find((p) => p.id === pid) || {}).name
         || PLATFORM_NAMES[pid] || pid;
+    }
+    function platformLogo(pid) {
+      return PLATFORM_LOGOS[pid] || { text: (pid || "?").slice(0, 1).toUpperCase(), color: "#8a94a6" };
     }
     function gearName(gid) {
       return (gears.value.find((g) => g.id === gid) || {}).name || "设置#" + gid;
@@ -916,6 +925,7 @@ const app = createApp({
       platformName, selectedFilter, currentStatus, running, canStart, startHint,
       sortState, skipTip, currentTableName,
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
+      platformLogo,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
       viewTaskJobs, clearTaskFilter, onTaskPick, openTaskDialog, delTask,

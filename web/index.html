@@ -82,6 +82,7 @@
     .platform-switch { display: flex; gap: 8px; }
     .psw-item {
       flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
       text-align: center; cursor: pointer; font-size: 13px; color: var(--text2);
       transition: all .15s; position: relative; user-select: none;
     }
@@ -89,6 +90,13 @@
     .psw-item.active {
       border-color: var(--el-color-primary); color: var(--el-color-primary);
       background: var(--el-color-primary-light-9); font-weight: 600;
+    }
+    /* 平台品牌徽标:品牌色圆角块 + 白字(不依赖外部 logo 资源) */
+    .plogo {
+      width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 10px; font-weight: 700; letter-spacing: -.5px;
+      line-height: 1;
     }
     .psw-item .badge {
       position: absolute; top: -5px; right: -5px; width: 9px; height: 9px; border-radius: 50%;
@@ -450,6 +458,7 @@
           <div v-for="p in platforms" :key="p.id" class="psw-item"
                :class="{ active: grab.platform === p.id }" @click="switchPlatform(p.id)">
             <span class="badge" :class="isRunning(p.id) ? 'on' : 'off'"></span>
+            <span class="plogo" :style="{ background: platformLogo(p.id).color }">{{ platformLogo(p.id).text }}</span>
             {{ p.name }}
           </div>
         </div>
