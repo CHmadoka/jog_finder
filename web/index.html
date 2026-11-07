@@ -105,7 +105,13 @@
          ascent 度量差约 0.16em,文字盒在行盒中下沉(底贴边、顶空 2px),平台名
          视觉中心比圆点低约 1px;实测统一后中心差归零,baseline 对齐体系不变 */
       font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
-    .ts-item .dot { align-self: center; }
+    /* 圆点锚定基线而非行盒中心:人眼对齐的是汉字字面(ink)中心——
+       雅黑 13px 字面 ≈ [基线-11, 基线+1.5],字面中心 ≈ 基线上方 4.75px;
+       行盒中心(空闲态)在基线上方 5.5px,圆点按 center 对齐会比字面偏高约 0.75px
+       (实测圆点中心 27.5 vs 字面中心 ≈28.25)。合成基线取圆点边框盒底边,
+       贴基线后 relative 上移 0.75px 即中心=字面中心;基线锚定在运行态
+       (徽章把行盒下方撑高)也不会漂移,center+top 方案则会 */
+    .ts-item .dot { align-self: baseline; position: relative; top: -0.75px; }
     .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
     .ts-idle { font-size: 12px; color: var(--text3); }
     .ts-progress {
