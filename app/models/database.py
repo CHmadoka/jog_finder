@@ -60,6 +60,23 @@ _NEW_COLUMNS = {
 DEFAULT_TABLE = (1, "默认表", "default")
 
 
+def _lcs_len(a: str, b: str) -> int:
+    """最长公共连续子串长度(小文本启发式,用于词条-标题关联度)。"""
+    if not a or not b:
+        return 0
+    best = 0
+    for i in range(len(a)):
+        if a[i] not in b:
+            continue
+        for j in range(len(b)):
+            n = 0
+            while i + n < len(a) and j + n < len(b) and a[i + n] == b[j + n]:
+                n += 1
+            if n > best:
+                best = n
+    return best
+
+
 def init_db() -> None:
     from .entities import Base
 
@@ -115,9 +132,10 @@ def _migrate_columns() -> None:
             "city = ifnull(json_extract(filter_snapshot, '$.city'), '') "
             "WHERE ifnull(keywords, '') = '' AND filter_snapshot IS NOT NULL"
         ))
-        # 一次性:回填旧岗位的搜索来源词条——取标题/描述中命中的第一个词条
-        # (确定性依据,非猜测;文本无命中的留空,由新任务实时记录)。
-        # user_version 守卫防重复全表扫描。
+        # 一次性:回填旧岗位的搜索来源词条。优先取标题/描述中命中的第一个
+        # 词条(精确匹配);无精确命中时取"与标题最长公共子串"的任务词条,
+        # 作为关联/扩展词条(平台按词条扩展返回的岗位,如 数据开发↔数据处理、
+        # 运维技师↔桌面运维;公共子串<2字视为无关不硬凑)。user_version 守卫。
         if ver < 3:
             rows = conn.execute(text(
                 "SELECT id, title, description, keyword FROM job "
@@ -125,8 +143,13 @@ def _migrate_columns() -> None:
             )).mappings().all()
             for r in rows:
                 kws = [k.strip() for k in re.split(r"[、,，|;；]", r["keyword"] or "") if k.strip()]
-                hay = f"{(r['title'] or '').lower()}\n{(r['description'] or '').lower()}"
+                title = (r["title"] or "").lower()
+                hay = f"{title}\n{(r['description'] or '').lower()}"
                 hit = next((k for k in kws if k.lower() in hay), "")
+                if not hit and kws and title:
+                    hit = max(kws, key=lambda k: _lcs_len(title, k.lower()))
+                    if _lcs_len(title, hit.lower()) < 2:
+                        hit = ""   # 与所有词条几乎无交集,不硬凑
                 if hit:
                     conn.execute(text("UPDATE job SET source_keyword = :k WHERE id = :i"),
                                  {"k": hit[:100], "i": r["id"]})

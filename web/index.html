@@ -283,6 +283,11 @@
       background: #ffe58f; color: inherit; padding: 0 2px;
       border-radius: 3px; font-weight: 700;
     }
+    /* header 区(标题+置顶操作按钮):占满左侧,不随内容滚动 */
+    .drawer-head { flex: 1; min-width: 0; }
+    .drawer-actions { margin-top: 8px; display: flex; gap: 10px; }
+    /* 关联/扩展词条标签内的关联图标 */
+    .hit-ico { vertical-align: -3px; margin-right: 3px; }
     /* 详情抽屉基础信息表格文本可选中复制 */
     .el-drawer .el-descriptions__body { user-select: text; cursor: text; }
     .block-title { font-size: 13px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; }
@@ -675,17 +680,23 @@
   <!-- ===================== 岗位详情抽屉 ===================== -->
   <el-drawer v-model="showDetail" size="52%">
     <template #header>
-      <!-- 标题词条高亮:入库匹配规则同样检查标题(未命中会记不符原因) -->
-      <span v-if="currentJob && highlightedTitle" class="drawer-title" v-html="highlightedTitle"></span>
-      <span v-else>岗位详情</span>
+      <!-- 标题词条高亮 + 操作按钮持续置顶(header 不随内容滚动) -->
+      <div class="drawer-head">
+        <span v-if="currentJob && highlightedTitle" class="drawer-title" v-html="highlightedTitle"></span>
+        <span v-else>岗位详情</span>
+        <div class="drawer-actions" v-if="currentJob">
+          <el-button type="primary" size="small" @click="openJob(currentJob)">在已登录浏览器打开</el-button>
+          <el-button type="danger" plain size="small" @click="delJob(currentJob)">删除</el-button>
+        </div>
+      </div>
     </template>
     <template v-if="currentJob">
       <div style="display:flex; gap:8px; margin-bottom:12px;">
         <el-tag v-if="currentJob.fit === true" type="success" effect="light">契合</el-tag>
         <el-tag v-else-if="currentJob.fit === false" type="danger" effect="light">不符</el-tag>
         <el-tag effect="plain">{{ platformOf(currentJob.platform) }}</el-tag>
-        <el-tag v-for="h in hitKeywords" :key="'hit-' + h.kw" type="warning" effect="light"
-                :title="h.tip">{{ h.kw }}</el-tag>
+        <el-tag v-for="h in hitKeywords" :key="'hit-' + h.kw"
+                :type="h.exact ? 'warning' : 'primary'" effect="light" :title="h.tip"><el-icon v-if="!h.exact" class="hit-ico"><connection /></el-icon>{{ h.kw }}</el-tag>
       </div>
       <el-descriptions :column="2" size="small" border>
         <el-descriptions-item label="公司">{{ currentJob.company }}</el-descriptions-item>
@@ -724,10 +735,6 @@
       <div v-if="currentJob.description" class="drawer-desc"
            v-html="highlightedDesc"></div>
       <div v-else class="drawer-desc">（未抓取到描述）</div>
-      <div style="margin-top:16px; display:flex; gap:10px;">
-        <el-button type="primary" @click="openJob(currentJob)">在已登录浏览器打开</el-button>
-        <el-button type="danger" plain @click="delJob(currentJob)">删除</el-button>
-      </div>
     </template>
   </el-drawer>
 

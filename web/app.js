@@ -287,24 +287,33 @@ const app = createApp({
       const raw = (currentJob.value || {}).keyword || "";
       return [...new Set(raw.split(/[、,，|;；]+/).map((s) => s.trim()).filter(Boolean))];
     });
-    // 命中词条 = 来源词条(source_keyword,该岗位由哪个词条的搜索结果中抓出,
-    // 旧数据无此值则回退纯文本命中) ∪ 文本子串命中的词条。
-    // 大小写不敏感——与入库匹配规则一致(evaluate_job 用 lower() 比较标题,
-    // 描述同样全小写比较,此前描述未小写导致英文词条在标签中漏判)。
+    // 命中词条分两态:
+    // - 精确命中(exact=true,黄色):词条出现在标题/描述文本中;
+    // - 关联/扩展(exact=false,蓝色+关联图标):来源词条(source_keyword,
+    //   该岗位由哪个词条的搜索结果中抓出)但文本未精确出现——平台按词条
+    //   扩展返回的相关岗位(如 数据开发↔数据处理),颜色与图标区分。
+    // 大小写不敏感——与入库匹配规则一致(evaluate_job 用 lower() 比较)。
     const hitKeywords = computed(() => {
       const j = currentJob.value || {};
-      const out = [];
+      const hay = `${(j.title || "").toLowerCase()}\n${(j.description || "").toLowerCase()}`;
+      const hit = (k) => hay.includes(k.toLowerCase());
       const src = (j.source_keyword || "").trim();
-      // 来源词条即使文本未出现也算匹配(如描述换了说法但确由该词条搜出)
-      if (src) out.push({ kw: src, tip: "来源词条:本岗位由该词条的搜索结果中抓取" });
-      if (jobKeywords.value.length) {
-        const hay = `${(j.title || "").toLowerCase()}\n${(j.description || "").toLowerCase()}`;
-        for (const k of jobKeywords.value) {
-          if (k === src) continue;   // 来源词条已列,避免重复标签
-          if (hay.includes(k.toLowerCase())) {
-            out.push({ kw: k, tip: "出现在本岗位标题或描述中" });
-          }
-        }
+      const out = [];
+      const seen = new Set();
+      if (src) {
+        const exact = hit(src);
+        out.push({
+          kw: src, exact,
+          tip: exact
+            ? "来源词条:出现在标题或描述中(精确匹配)"
+            : "关联词条:本岗位由该词条的搜索结果扩展抓取(文本未精确出现)",
+        });
+        seen.add(src);
+      }
+      for (const k of jobKeywords.value) {
+        if (seen.has(k) || !hit(k)) continue;
+        out.push({ kw: k, exact: true, tip: "出现在本岗位标题或描述中(精确匹配)" });
+        seen.add(k);
       }
       return out;
     });
