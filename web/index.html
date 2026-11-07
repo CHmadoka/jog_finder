@@ -60,18 +60,47 @@
     .brand .sub { font-size: 12px; font-weight: 400; color: var(--text3); }
     .topbar .spacer { flex: 1; }
 
+    /* ---------- 顶部中心状态区(任一平台运行时显示,全空闲隐藏) ---------- */
+    .top-status {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      top: 0; height: 100%;
+      display: flex; align-items: center; gap: 20px;
+    }
+    .ts-item { position: relative; display: flex; align-items: center; gap: 7px; max-width: 470px; }
+    .ts-name { font-weight: 600; font-size: 13px; white-space: nowrap; color: var(--text); }
+    .ts-progress {
+      font-size: 12px; color: var(--text2); max-width: 250px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ts-counters { display: flex; gap: 4px; flex-shrink: 0; }
+    .tsc {
+      font-size: 11px; padding: 1px 6px; border-radius: 4px; line-height: 16px;
+      background: #eef2f7; color: #5a6472; white-space: nowrap;
+    }
+    .tsc.save { background: #e7f7ee; color: #16803c; }
+    .tsc.skip { background: #fdf3e3; color: #b45309; }
+    /* 组合进度浮层:悬停平台段向下展开(词条×城市全部组合) */
+    .combo-pop {
+      position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      background: #fff; border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(16,24,40,.14); padding: 8px 12px;
+      min-width: 260px; max-height: 320px; overflow-y: auto; z-index: 60;
+      font-size: 12px; line-height: 1.9;
+    }
+
     /* ---------- 布局 ---------- */
     .layout { display: flex; height: calc(100vh - 56px); }
     .side {
-      width: 396px; flex-shrink: 0; padding: 10px 12px;
+      /* 状态卡迁至顶栏后左栏收窄 20px,让位给右侧表格;与右栏间隔 = 右 padding 12 + main 左 padding 2 = 14px */
+      width: 376px; flex-shrink: 0; padding: 10px 12px;
       /* 滚动条常驻:内容高度随平台/任务状态变化(如「最近任务」卡片空/非空差 8px),
          若用 auto,高度恰在临界点时滚动条会忽隐忽现,内容区宽度跳 15px,卡片看起来"变宽" */
       overflow-y: scroll; scrollbar-gutter: stable;
       display: flex; flex-direction: column; gap: 8px;
     }
-    /* 右栏边距与左栏一致(上/右/下 10/12,左由 side 的右 padding 提供):
-       顶栏下方两侧首行内容对齐,最近任务卡片与右栏底部同步 */
-    .main { flex: 1; min-width: 0; padding: 10px 12px 10px 0; display: flex; flex-direction: column; }
+    /* 右栏边距与左栏一致(上/右/下 10/12,左 2px 与 side 右 padding 合计 14px 间隔):
+       顶栏下方两侧首行内容对齐 */
+    .main { flex: 1; min-width: 0; padding: 10px 12px 10px 2px; display: flex; flex-direction: column; }
 
     .card {
       background: var(--card); border: 1px solid var(--border);
@@ -137,11 +166,11 @@
     .link:hover { text-decoration: underline; }
 
     /* ---------- 已存条件摘要 ---------- */
+    /* 恒定占位(84px,与快速模式城市标签区等高):无条件/未选时显示占位文案 */
     .cond-summary {
       background: #f7f8fc; border: 1px solid var(--border); border-radius: 8px;
-      padding: 8px 10px; margin-top: 6px; font-size: 12px; color: var(--text2); line-height: 1.9;
-      /* 限高约 3 行:城市/行业标签很多时不再撑高左栏,超出内部滚动 */
-      max-height: 72px; overflow-y: auto; scrollbar-gutter: stable;
+      padding: 8px 10px; margin-top: 0; font-size: 12px; color: var(--text2); line-height: 1.9;
+      height: 84px; overflow-y: auto; scrollbar-gutter: stable;
     }
     .cond-summary .cs-k { color: var(--text3); display: inline-block; width: 44px; }
     .cond-summary .el-tag { margin-right: 4px; }
@@ -149,9 +178,16 @@
     /* 抓取按钮外层(tooltip 触发载体 + 上边距):禁用按钮本身不冒泡鼠标事件 */
     .grab-btn-wrap { display: block; width: 100%; margin-top: 10px; }
     .grab-btn-wrap .el-button { width: 100%; margin-top: 0; }
-    /* 抓取按钮外层(tooltip 触发载体 + 上边距):禁用按钮本身不冒泡鼠标事件 */
-    .grab-btn-wrap { display: block; width: 100%; margin-top: 10px; }
-    .grab-btn-wrap .el-button { width: 100%; margin-top: 0; }
+    /* 两种抓取模式统一固定高度的内容区:切换模式卡片高度不变,
+       最近任务卡片(贴底)上方间距稳定。高度 = label+控件 × 3 组 + 城市/摘要区 84~85 + 余量 */
+    .grab-mode-area { height: 232px; overflow: hidden; }
+    /* 城市选择器(CityPicker):级联选择在上、已选标签区在下且恒定 52px,
+       空态占位文案 —— 组件总高恒定 */
+    .city-editor { display: block; padding: 2px 8px 3px; }
+    .city-editor .el-cascader { width: 100%; }
+    .city-tags { height: 52px; align-content: flex-start; }
+    .tags-empty { font-size: 12px; color: var(--text3); line-height: 20px; }
+
     /* ---------- 工具栏组合框(数据表下拉 + 设置) ---------- */
     .table-combo {
       display: inline-flex; align-items: center;
@@ -241,36 +277,20 @@
 
     .k-unit { color: #f59e0b; font-weight: 700; font-size: 13px; }
 
-    /* ---------- 运行状态 ---------- */
-    .run-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    /* ---------- 运行状态(顶部中心区;复用 .dot/.combo-line) ---------- */
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .dot.on { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); animation: blink 1.2s infinite; }
     .dot.off { background: #cbd2dc; }
     @keyframes blink { 50% { opacity: .4; } }
-    .progress-text {
-      font-size: 12px; color: var(--text2); line-height: 1.6; word-break: break-all; margin-top: 6px;
-      /* 限 2 行:长进度文本不撑高左栏 */
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-    }
-    /* 任务组合进度:当前组合单行;悬停向下展开全部分组(词条/城市分行显示),
-       展开时限高滚动(词条×城市多时不再无限撑高左栏) */
-    .combo-box { margin-top: 6px; font-size: 12px; line-height: 1.9; max-height: 150px; overflow-y: auto; scrollbar-gutter: stable; }
     .combo-line { display: flex; gap: 6px; align-items: center; padding: 1px 0; color: var(--text2); }
     .combo-line .c-idx { color: var(--text3); flex-shrink: 0; min-width: 36px; font-variant-numeric: tabular-nums; }
     .combo-line .c-kw { color: var(--el-text-color-primary); }
     .combo-line .c-city { color: var(--text3); }
     .combo-line .c-mark { margin-left: auto; color: var(--text3); }
-    .combo-line.current { color: var(--el-color-primary); cursor: default; }
     .combo-line.is-running { color: var(--el-color-primary); }
     .combo-line.is-running .c-mark { color: var(--el-color-primary); }
     .combo-line.is-done { opacity: .55; }
     .combo-line.is-done .c-mark { color: var(--el-color-success); }
-    .counters { display: flex; gap: 8px; margin-top: 10px; }
-    .counter {
-      flex: 1; background: #f7f8fc; border-radius: 8px; text-align: center; padding: 8px 0;
-    }
-    .counter .num { font-size: 18px; font-weight: 700; color: var(--text); }
-    .counter .lbl { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
     /* ---------- 任务历史 ---------- */
     /* 卡片固定:不参与左栏 flex 拉伸,margin-top:auto 把卡片推到左栏底部贴边
@@ -492,6 +512,32 @@
       <span>JobFinder</span>
       <span class="sub">已登录浏览器自动抓取岗位 · {{ healthText }}</span>
     </div>
+
+    <!-- 顶部中心状态区:任一平台运行时显示(每平台一段:圆点+名称+进度+计数),
+         悬停平台段向下浮层展开任务组合(词条×城市);全空闲时隐藏 -->
+    <div class="top-status" v-if="runningPlatforms.length">
+      <div class="ts-item" v-for="rp in runningPlatforms" :key="rp.pid"
+           @mouseenter="comboHover = rp.pid" @mouseleave="comboHover = null">
+        <span class="dot on"></span>
+        <span class="ts-name">{{ platformOf(rp.pid) }}</span>
+        <span class="ts-progress" :title="rp.status.progress">{{ rp.status.progress || '正在准备…' }}</span>
+        <span class="ts-counters" v-if="rp.status.counters">
+          <span class="tsc">发现 {{ rp.status.counters.found || 0 }}</span>
+          <span class="tsc save">入库 {{ rp.status.counters.saved || 0 }}</span>
+          <span class="tsc skip" :title="skipTipOf(rp.pid)">跳过 {{ rp.status.counters.skipped || 0 }}</span>
+        </span>
+        <div class="combo-pop" v-if="rp.status.combos && comboHover === rp.pid">
+          <div class="combo-line" v-for="(c, i) in rp.status.combos.items" :key="i"
+               :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
+            <span class="c-idx">{{ i + 1 }}/{{ rp.status.combos.total }}</span>
+            <span class="c-kw">「{{ c.kw }}」</span>
+            <span class="c-city">@{{ c.city || '全国' }}</span>
+            <span class="c-mark">{{ c.state === 'done' ? '✓' : (c.state === 'running' ? '▶' : '·') }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="spacer"></div>
     <el-dropdown @command="onMenu">
       <el-button>
@@ -546,8 +592,9 @@
           <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
         </div>
 
-        <!-- 快速抓取 -->
-        <template v-if="grab.mode === 'quick'">
+        <!-- 两种模式共用固定高度的内容区:切换模式时卡片高度不变,
+             最近任务卡片(margin-top:auto 贴底)上方间距稳定 -->
+        <div class="grab-mode-area" v-if="grab.mode === 'quick'">
           <div class="field-label">岗位设置</div>
           <div class="table-combo" style="width:100%">
             <el-select v-model="grab.gear_id" placeholder="选择设置" filterable
@@ -568,7 +615,7 @@
 
           <div class="field-label">每词条最多翻页数</div>
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
-        </template>
+        </div>
 
         <!-- 已存条件 -->
         <template v-else>
@@ -579,25 +626,27 @@
           <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="width:100%">
             <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name"></el-option>
           </el-select>
-          <div class="empty-tip" v-if="!filters.length">
-            当前平台暂无已存条件，点击右上角「管理条件」创建
-          </div>
-          <div class="cond-summary" v-if="selectedFilter">
-            <div><span class="cs-k">城市</span>{{ fmtCities(selectedFilter.city) }}</div>
-            <div><span class="cs-k">设置</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联设置' }}</div>
-            <div><span class="cs-k">薪资</span>{{ fmtSalaryRange(selectedFilter.extras.salary) }}</div>
-            <div v-if="(selectedFilter.extras.industries_avoid || []).length">
-              <span class="cs-k">避开</span>
-              <el-tag v-for="k in selectedFilter.extras.industries_avoid" :key="k" size="small" type="danger" effect="plain">{{ k }}</el-tag>
-            </div>
-            <div v-if="(selectedFilter.extras.industries_prefer || []).length">
-              <span class="cs-k">优先</span>
-              <el-tag v-for="k in selectedFilter.extras.industries_prefer" :key="k" size="small" type="success" effect="plain">{{ k }}</el-tag>
-            </div>
-            <div><span class="cs-k">页数</span>每词条 {{ grab.max_pages }} 页</div>
-            <div style="margin-top:4px;">
-              <span class="link" @click="editSelectedFilter">编辑此条件</span>
-            </div>
+          <!-- 条件摘要区恒定占位(与快速模式的城市标签区等高):无条件/未选时显示占位文案,
+               切换模式/选择条件不再引起卡片高度波动 -->
+          <div class="cond-summary">
+            <template v-if="selectedFilter">
+              <div><span class="cs-k">城市</span>{{ fmtCities(selectedFilter.city) }}</div>
+              <div><span class="cs-k">设置</span>{{ selectedFilter.gear_id ? gearName(selectedFilter.gear_id) : '未关联设置' }}</div>
+              <div><span class="cs-k">薪资</span>{{ fmtSalaryRange(selectedFilter.extras.salary) }}</div>
+              <div v-if="(selectedFilter.extras.industries_avoid || []).length">
+                <span class="cs-k">避开</span>
+                <el-tag v-for="k in selectedFilter.extras.industries_avoid" :key="k" size="small" type="danger" effect="plain">{{ k }}</el-tag>
+              </div>
+              <div v-if="(selectedFilter.extras.industries_prefer || []).length">
+                <span class="cs-k">优先</span>
+                <el-tag v-for="k in selectedFilter.extras.industries_prefer" :key="k" size="small" type="success" effect="plain">{{ k }}</el-tag>
+              </div>
+              <div><span class="cs-k">页数</span>每词条 {{ grab.max_pages }} 页</div>
+              <div style="margin-top:4px;">
+                <span class="link" @click="editSelectedFilter">编辑此条件</span>
+              </div>
+            </template>
+            <span v-else class="tags-empty">{{ filters.length ? '尚未选择条件' : '当前平台暂无已存条件，点右上角「管理与工具→筛选条件管理」创建' }}</span>
           </div>
           <div class="field-label">每词条最多翻页数</div>
           <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
@@ -627,47 +676,6 @@
             </el-button>
           </span>
         </el-tooltip>
-      </div>
-
-      <!-- 运行状态 -->
-      <div class="card">
-        <div class="run-head">
-          <span class="dot" :class="running ? 'on' : 'off'"></span>
-          {{ running ? platformName + ' 正在抓取' : platformName + ' 空闲' }}
-        </div>
-        <template v-if="running || currentStatus.progress">
-          <div class="progress-text">{{ currentStatus.progress || '正在准备…' }}</div>
-          <!-- 任务组合(词条×城市)进度:默认仅当前组合,悬停向下展开全部 -->
-          <div class="combo-box" v-if="running && currentStatus.combos"
-               @mouseenter="comboHover = true" @mouseleave="comboHover = false">
-            <template v-if="!comboHover">
-              <div class="combo-line current" v-if="comboCur">
-                <span class="c-idx">{{ comboCur.idx }}/{{ currentStatus.combos.total }}</span>
-                <span class="c-kw">「{{ comboCur.kw }}」</span>
-                <span class="c-city">@{{ comboCur.city || '全国' }}</span>
-                <span class="c-mark" title="悬停展开全部组合">▾</span>
-              </div>
-            </template>
-            <template v-else>
-              <div class="combo-line" v-for="(c, i) in currentStatus.combos.items" :key="i"
-                   :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
-                <span class="c-idx">{{ i + 1 }}/{{ currentStatus.combos.total }}</span>
-                <span class="c-kw">「{{ c.kw }}」</span>
-                <span class="c-city">@{{ c.city || '全国' }}</span>
-                <span class="c-mark">{{ c.state === 'done' ? '✓' : (c.state === 'running' ? '▶' : '·') }}</span>
-              </div>
-            </template>
-          </div>
-          <div class="counters" v-if="currentStatus.counters">
-            <div class="counter"><div class="num">{{ currentStatus.counters.found || 0 }}</div><div class="lbl">发现</div></div>
-            <div class="counter"><div class="num" style="color:var(--el-color-primary)">{{ currentStatus.counters.saved || 0 }}</div><div class="lbl">新入库</div></div>
-            <div class="counter" :title="skipTip">
-              <div class="num" style="color:#e6a23c">{{ currentStatus.counters.skipped || 0 }}</div><div class="lbl">跳过</div>
-            </div>
-          </div>
-          <div class="progress-text" v-if="skipTip">跳过原因: {{ skipTip }}</div>
-        </template>
-        <div class="empty-tip" v-else>暂无进行中的任务，配置好条件后点「开始抓取」</div>
       </div>
 
       <!-- 最近任务:全平台混排(行首平台徽标),固定 5 行高度、行区独立滚动、

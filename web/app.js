@@ -88,14 +88,17 @@ const CityPicker = {
     return { options, picked, onChange, remove };
   },
   template: `
-    <div class="kw-editor">
-      <div class="kw-tags" v-show="modelValue.length">
-        <el-tag v-for="(c, i) in modelValue" :key="c + i" size="small" effect="plain" closable
-                @close="remove(i)">{{ c }}</el-tag>
-      </div>
+    <div class="kw-editor city-editor">
       <el-cascader v-model="picked" :options="options" :props="{ expandTrigger: 'hover' }"
                    size="small" :placeholder="placeholder" :show-all-levels="false" clearable
                    @change="onChange"></el-cascader>
+      <div class="kw-tags city-tags">
+        <template v-if="modelValue.length">
+          <el-tag v-for="(c, i) in modelValue" :key="c + i" size="small" effect="plain" closable
+                  @close="remove(i)">{{ c }}</el-tag>
+        </template>
+        <span v-else class="tags-empty">尚未选择城市</span>
+      </div>
     </div>`,
 };
 
@@ -159,9 +162,6 @@ const app = createApp({
     let timer = null;
 
     // ---------- 计算属性 ----------
-    const platformName = computed(
-      () => platformOf(grab.platform)
-    );
     const selectedFilter = computed(
       () => filters.value.find((f) => f.id === grab.filter_id) || null
     );
@@ -182,27 +182,23 @@ const app = createApp({
     const sortState = computed(() => [
       { prop: SORT_PROP[query.sort_by] || "updated_at", order: query.sort_order === "asc" ? "ascending" : "descending" },
     ]);
-    // 跳过原因明细(运行中/结束时展示)
-    const skipTip = computed(() => {
-      const s = (currentStatus.value.counters || {}).skip_stats || {};
-      const txt = Object.entries(s).map(([k, v]) => `${k} ${v}`).join(",");
-      return txt || "";
-    });
+    // 跳过原因明细(tooltip 文案):按平台取,顶部状态段悬停"跳过"徽章时展示
+    function skipTipOf(pid) {
+      const s = (statuses[pid] || {}).counters || {};
+      return Object.entries(s.skip_stats || {}).map(([k, v]) => `${k} ${v}`).join(",") || "";
+    }
     // 存入目标表名(左栏抓取配置;与右栏浏览的工作表选择无关)
     const currentTableName = computed(() => {
       const t = tables.value.find((x) => x.id === (grab.table_id || 1));
       return t ? t.name : "默认表";
     });
 
-    // 任务组合进度:默认只显示当前组合行,悬停向下展开全部组合(词条×城市)
-    const comboHover = ref(false);
-    const comboCur = computed(() => {
-      const cb = currentStatus.value.combos;
-      if (!cb || !cb.items) return null;
-      const idx = cb.items.findIndex((c) => c.state === "running");
-      if (idx < 0) return null;
-      return { idx: idx + 1, kw: cb.items[idx].kw, city: cb.items[idx].city };
-    });
+    // 任务组合进度:顶部状态段悬停展开(浮层),comboHover 记录展开的平台 id
+    const comboHover = ref(null);
+    // 正在运行的平台列表(顶部中心状态区数据源;过滤 pollStatus 的 *_was 辅助键)
+    const runningPlatforms = computed(() => Object.entries(statuses)
+      .filter(([pid, s]) => s && s.running && !pid.endsWith("_was"))
+      .map(([pid, s]) => ({ pid, status: s })));
 
     // ---------- 工具 ----------
     async function api(path, opts = {}) {
@@ -995,13 +991,12 @@ const app = createApp({
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,
       jobKeywords, hitKeywords, highlightedDesc, highlightedTitle,
-      comboHover, comboCur,
+      comboHover,
       gearForm, filterForm, tableForm,
-      platformName, selectedFilter, currentStatus, running, canStart, startHint,
-      sortState, skipTip, currentTableName,
+      selectedFilter, currentStatus, running, canStart, startHint,
+      sortState, skipTipOf, currentTableName,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
-      kwCount, cityLabel,
-      kwCount, cityLabel,
+      kwCount, cityLabel, runningPlatforms,
       platformLogo, onLogoError,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
