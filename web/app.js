@@ -94,11 +94,15 @@ const app = createApp({
     const jobs = reactive({ total: 0, items: [] });
     const stats = reactive({ total: 0, fit: 0, unfit: 0, unknown: 0, online: 0 });
     const recentTasks = ref([]);
+    const taskOptions = ref([]);      // 左栏任务选择框候选(当前平台最近30条)
+    const taskMgrVisible = ref(false);
     const healthText = ref("检测连接...");
     const loading = ref(false);
     const starting = ref(false);
 
     // 左栏:抓取配置(只影响"发起抓取")
+    // table_id: 存入目标表(与右栏浏览筛选完全分离,新岗位固定存入该表)
+    // selected_task_id: 左栏任务选择框(选中后右栏按该任务过滤)
     const grab = reactive({
       platform: "boss",
       mode: "quick",            // quick | saved
@@ -110,6 +114,8 @@ const app = createApp({
       salary_max: "",           // 薪资范围上限(K/月,可缺省)
       max_pages: 10,
       all_keywords: true,
+      table_id: 1,              // 抓取结果存入的数据表
+      selected_task_id: null,   // 关联查看的任务(空 = 不过滤)
     });
 
     // 右栏:岗位浏览筛选(默认按最后更新时间倒序)
@@ -169,9 +175,9 @@ const app = createApp({
       const txt = Object.entries(s).map(([k, v]) => `${k} ${v}`).join(",");
       return txt || "";
     });
-    // 当前数据表名(工作表;抓取结果存入该表)
+    // 存入目标表名(左栏抓取配置;与右栏浏览的工作表选择无关)
     const currentTableName = computed(() => {
-      const t = tables.value.find((x) => x.id === (query.table_id || 1));
+      const t = tables.value.find((x) => x.id === (grab.table_id || 1));
       return t ? t.name : "默认表";
     });
 
@@ -315,6 +321,10 @@ const app = createApp({
     async function loadTasks() {
       recentTasks.value = await api(`/tasks?platform=${grab.platform}&limit=5`);
     }
+    async function loadTaskOptions() {
+      // 左栏任务选择框候选:当前平台最近 30 条(含状态/时间/词条摘要)
+      try { taskOptions.value = await api(`/tasks?platform=${grab.platform}&limit=30`); } catch (e) {}
+    }
     async function pollStatus() {
       try {
         const st = await api("/tasks/status");
@@ -329,7 +339,7 @@ const app = createApp({
           statuses[pid] = v;
           statuses[pid + "_was"] = v.running;
         }
-        if (ended) { reloadJobs(); loadTasks(); loadPlatforms(); loadEvents(); }
+        if (ended) { reloadJobs(); loadTasks(); loadPlatforms(); loadEvents(); loadTaskOptions(); }
         // 运行中每 15 秒轻量刷新一次数据,让新入库岗位及时可见
         pollTick = (pollTick + 1) % 5;
         if (pollTick === 0 && Object.values(st).some((v) => v.running)) {
@@ -388,9 +398,11 @@ const app = createApp({
       if (grab.platform === pid) return;
       grab.platform = pid;
       grab.filter_id = null;   // 条件按平台隔离
+      grab.selected_task_id = null;   // 任务候选按平台隔离
       query.task_id = null;    // 任务按平台隔离:切平台即退出任务过滤视图
       await loadFilters();
       loadTasks();
+      loadTaskOptions();
     }
     function switchMode(m) { grab.mode = m; }
 
@@ -408,6 +420,39 @@ const app = createApp({
     function clearTaskFilter() {
       query.task_id = null;
       query.page = 1;
+      reloadJobs();
+    }
+    // 左栏任务选择框:选中即右栏按任务过滤,清空即还原
+    function onTaskPick(tid) {
+      if (tid) viewTaskJobs(tid, grab.platform);
+      else clearTaskFilter();
+    }
+    // 右栏过滤状态变化(任意入口)同步回左栏下拉,两处显示一致
+    watch(() => query.task_id, (v) => { grab.selected_task_id = v || null; });
+
+    // ---------- 任务管理(删除任务及其全部岗位数据) ----------
+    function openTaskDialog() {
+      taskMgrVisible.value = true;
+      loadTaskOptions();
+    }
+    async function delTask(t) {
+      const n = t.saved ?? 0;
+      await ElMessageBox.confirm(
+        `删除任务 #${t.id}(${taskText(t.status)} ${fmtDate(t.started_at)})?`
+        + ` 该任务关联的全部岗位数据将一并删除(含新入库 ${n} 条及被该任务更新过的岗位),不可恢复。`,
+        "删除任务", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+      );
+      try {
+        const r = await api(`/tasks/${t.id}`, { method: "DELETE" });
+        ElMessage.success(`任务 #${t.id} 已删除,清除岗位 ${r.deleted_jobs} 条`);
+      } catch (e) {
+        return;   // 失败(如运行中):api 层已弹错误提示
+      }
+      // 删除的是当前正在查看的任务:退出任务过滤视图
+      if (query.task_id === t.id) clearTaskFilter();
+      if (grab.selected_task_id === t.id) grab.selected_task_id = null;
+      loadTaskOptions();   // 弹窗保持打开,列表刷新后可继续删除其它任务
+      loadTasks();
       reloadJobs();
     }
 
@@ -433,7 +478,7 @@ const app = createApp({
         const base = {
           platform: grab.platform,
           salary,
-          table_id: query.table_id || 1,
+          table_id: grab.table_id || 1,   // 存入目标表(左栏选择,与右栏浏览无关)
           max_pages: grab.max_pages,
         };
         const body = grab.mode === "saved"
@@ -628,6 +673,8 @@ const app = createApp({
         query.table_id = 1;
         reloadJobs();
       }
+      // 删除的是左栏"存入目标表":回退默认表(否则新抓数据写入不存在的表)
+      if ((grab.table_id || 1) === row.id) grab.table_id = 1;
       resetTableForm();
       loadTables();
     }
@@ -729,6 +776,7 @@ const app = createApp({
       }
       await loadFilters();
       await loadTasks();
+      loadTaskOptions();
       loadEvents();
       reloadJobs();
       await pollStatus();
@@ -743,6 +791,7 @@ const app = createApp({
     return {
       SearchIcon, RefreshIcon, LinkIcon, DeleteIcon, SettingIcon,
       platforms, gears, filters, tables, jobs, stats, recentTasks, events, eventsOpen,
+      taskOptions, taskMgrVisible,
       grab, query, statuses, healthText, loading, starting,
       currentJob, showDetail, gearVisible, filterVisible, tableVisible,
       taskDetailVisible, detailTask, showTaskDetail, welfareTags,
@@ -752,7 +801,7 @@ const app = createApp({
       platformOf, gearName, isRunning, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       activeTagType, activeTip, clearEvents, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
-      viewTaskJobs, clearTaskFilter,
+      viewTaskJobs, clearTaskFilter, onTaskPick, openTaskDialog, delTask,
       loadJobs,
       onSortChange, toggleSortOrder, onTableChange,
       openGearDialog, resetGearForm, editGear, createGear, saveGear, delGear,

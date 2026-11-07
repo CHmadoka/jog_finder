@@ -324,6 +324,8 @@ class Scheduler:
         # platform -> 最近一次结束的任务结果 {task_id, status, message}。
         # 供 /tasks/status 返回,前端据此在任务意外中断(风控/异常)时弹窗提示。
         self._last_result: dict[str, dict] = {}
+        # platform -> 运行中的 crawl_task id(删除任务接口用于拒绝删除运行中任务)
+        self._running_task_ids: dict[str, int] = {}
 
     # ---------- 状态 ----------
     def is_running(self, platform: str) -> bool:
@@ -362,6 +364,12 @@ class Scheduler:
             ev.set()
             return True
         return False
+
+    def running_task_id(self, platform: str) -> int | None:
+        """该平台当前运行中的 crawl_task id(未运行返回 None)。"""
+        if not self.is_running(platform):
+            return None
+        return self._running_task_ids.get(platform)
 
     # ---------- 启动 ----------
     async def start(
@@ -441,6 +449,7 @@ class Scheduler:
         self._stops[platform] = asyncio.Event()
         self._progress[platform] = "启动中..."
         self._counters[platform] = {"found": 0, "saved": 0, "skipped": 0, "skip_stats": {}}
+        self._running_task_ids[platform] = task_id
         self._tasks[platform] = asyncio.create_task(
             self._run(plat, task_id, snapshot), name=f"crawl-{platform}"
         )
@@ -725,6 +734,8 @@ class Scheduler:
             }
             self._tasks.pop(platform, None)
             self._stops.pop(platform, None)
+            if self._running_task_ids.get(platform) == task_id:
+                self._running_task_ids.pop(platform, None)
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)
 
     async def _process_one(

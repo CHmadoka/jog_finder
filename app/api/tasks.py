@@ -7,7 +7,7 @@ import threading
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..models import CrawlTask, get_session
+from ..models import CrawlTask, Job, get_session
 from ..models.schemas import PLATFORMS, TaskOut
 from ..platforms import all_platforms, get_platform
 from ..platforms.base import AntiBot
@@ -119,3 +119,24 @@ def task_history(platform: str | None = None, limit: int = 20, db: Session = Dep
     if platform:
         q = db.query(CrawlTask).filter(CrawlTask.platform == platform).order_by(CrawlTask.id.desc()).limit(limit)
     return q.all()
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_session)):
+    """删除抓取任务及其关联的全部岗位数据(crawl_task_id 指向该任务的所有岗位)。
+
+    运行中的任务不可删除(先停止)。删除岗位数随响应返回,供前端提示。
+    """
+    row = db.get(CrawlTask, task_id)
+    if not row:
+        raise HTTPException(404, "任务不存在")
+    if scheduler.running_task_id(row.platform) == task_id:
+        raise HTTPException(409, "任务正在运行,请先停止抓取后再删除")
+    n = (
+        db.query(Job)
+        .filter(Job.crawl_task_id == task_id)
+        .delete(synchronize_session=False)
+    )
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted_jobs": n}

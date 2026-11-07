@@ -355,6 +355,33 @@
           </div>
         </div>
 
+        <!-- 任务选择:选中后右栏按该任务过滤;设置入口可删除任务及其全部数据 -->
+        <div class="field-label" style="margin-top:12px;">任务(选择后右栏按其过滤)</div>
+        <div class="table-combo" style="width:100%">
+          <el-select v-model="grab.selected_task_id" placeholder="选择任务查看其岗位" clearable filterable
+                     style="flex:1; min-width:0" @change="onTaskPick">
+            <el-option v-for="t in taskOptions" :key="t.id" :value="t.id"
+                       :label="'#' + t.id + ' ' + taskText(t.status) + ' ' + fmtDate(t.started_at)">
+              <span>#{{ t.id }} {{ taskText(t.status) }}</span>
+              <span style="float:right; color:#9aa0aa; font-size:12px">{{ fmtDate(t.started_at) }} {{ (t.keywords || '').split('|')[0] }}@{{ fmtCities(t.city) }}</span>
+            </el-option>
+          </el-select>
+          <el-tooltip content="管理任务(删除任务及其全部关联岗位)" placement="top">
+            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTaskDialog"></el-button>
+          </el-tooltip>
+        </div>
+
+        <!-- 存入目标表:抓取结果固定写入该表,与右栏浏览的工作表筛选分离 -->
+        <div class="field-label" style="margin-top:10px;">存入数据表(与右侧浏览无关)</div>
+        <div class="table-combo" style="width:100%">
+          <el-select v-model="grab.table_id" style="flex:1; min-width:0">
+            <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
+          </el-select>
+          <el-tooltip content="管理数据表(新建 / 重命名 / 清空 / 删除)" placement="top">
+            <el-button class="combo-setting" :icon="SettingIcon" text size="small" @click="openTableDialog"></el-button>
+          </el-tooltip>
+        </div>
+
         <div class="seg" style="margin-top:12px;">
           <div class="seg-item" :class="{ active: grab.mode === 'quick' }" @click="grab.mode = 'quick'">快速抓取</div>
           <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
@@ -701,6 +728,38 @@
         </el-button>
       </div>
     </template>
+  </el-dialog>
+
+  <!-- ===================== 任务管理弹窗 ===================== -->
+  <el-dialog v-model="taskMgrVisible" title="任务管理" width="760px">
+    <el-table v-if="taskOptions.length" :data="taskOptions" size="small" max-height="420">
+      <el-table-column prop="id" label="#" width="56"></el-table-column>
+      <el-table-column label="状态" width="84">
+        <template #default="{ row }">
+          <el-tag size="small" effect="light" :type="taskTagType(row.status)">{{ taskText(row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="词条@城市" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">{{ (row.keywords || '').split('|').join('、') || '—' }}@{{ fmtCities(row.city) }}</template>
+      </el-table-column>
+      <el-table-column label="开始时间" width="120">
+        <template #default="{ row }">{{ fmtTime(row.started_at) }}</template>
+      </el-table-column>
+      <el-table-column label="发现/入库" width="86" align="center">
+        <template #default="{ row }">{{ row.found }}/{{ row.saved }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="78" align="right" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" type="danger" plain :disabled="row.status === 'running'"
+                     :title="row.status === 'running' ? '运行中的任务请先停止抓取' : '删除该任务及其全部关联岗位'"
+                     @click="delTask(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="empty-tip" v-else>当前平台暂无任务记录</div>
+    <el-text type="info" size="small">
+      仅列出当前平台最近 30 条任务。删除任务会同时删除该任务产生/最后更新过的全部岗位数据,不可恢复。
+    </el-text>
   </el-dialog>
 
   <!-- ===================== 岗位设置管理 ===================== -->
