@@ -32,6 +32,17 @@ def clear_events(db: Session = Depends(get_session)):
     return {"ok": True, "deleted": n}
 
 
+@router.delete("/{event_id}")
+def clear_event(event_id: int, db: Session = Depends(get_session)):
+    """手动清除单条异常记录(逐条清理,不影响其它记录)。"""
+    ev = db.get(AppEvent, event_id)
+    if not ev:
+        raise HTTPException(404, "异常记录不存在")
+    db.delete(ev)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{event_id}/open")
 async def open_event(event_id: int, db: Session = Depends(get_session)):
     """在已登录的抓取浏览器中打开异常相关页面(排查字段问题用)。"""

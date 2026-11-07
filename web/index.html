@@ -511,8 +511,10 @@
     }
     .ep-time { color: var(--text3); flex-shrink: 0; font-family: Consolas, monospace; }
     .ep-plat { color: var(--el-color-primary); flex-shrink: 0; }
-    .ep-msg { color: #b45309; word-break: break-all; }
+    .ep-msg { color: #b45309; word-break: break-all; flex: 1; min-width: 0; }
     .ep-msg.ep-link { color: var(--el-color-primary); }
+    /* 行尾单条清除按钮:幽灵图标按钮缩小版;行内垂直居中(多行文本行按基线对齐会把按钮顶到首行) */
+    .ep-row .ep-del { padding: 3px 6px; align-self: center; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -553,11 +555,7 @@
       </div>
       <div class="event-panel" v-if="eventsOpen">
         <div class="ep-head">
-          <span>抓取异常(字段解析失败,平台可能已改版;手动清除前持久保留)</span>
-          <div style="display:flex; gap:8px;">
-            <el-button size="small" type="danger" plain @click="clearEvents">清除全部</el-button>
-            <el-button size="small" @click="eventsOpen = false">收起</el-button>
-          </div>
+          <el-button size="small" type="danger" plain style="margin-left:auto" @click="clearEvents">清除全部</el-button>
         </div>
         <div class="ep-body">
           <div class="ep-row" v-for="e in events" :key="e.id"
@@ -566,6 +564,8 @@
             <span class="ep-time">{{ fmtTime(e.created_at) }}</span>
             <span class="ep-plat">{{ platformOf(e.platform) }}</span>
             <span class="ep-msg" :class="{ 'ep-link': e.url }">{{ e.message }}</span>
+            <button class="act-btn danger ep-del" title="清除该条异常"
+                    @click.stop="clearEvent(e)"><el-icon><Delete /></el-icon></button>
           </div>
         </div>
       </div>

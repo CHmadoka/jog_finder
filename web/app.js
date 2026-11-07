@@ -383,14 +383,12 @@ const app = createApp({
     const highlightedDesc = computed(() => highlightText((currentJob.value || {}).description));
     // 标题高亮:入库匹配规则同样看标题,标题一并高亮
     const highlightedTitle = computed(() => highlightText((currentJob.value || {}).title));
-    // 异常面板收起:仅唤起胶囊豁免(它自身负责开/关切换);矩形面板内部不再
-    // 豁免——内部任意点击(异常行/按钮/边距空白)都会收起,其上的交互动作
-    // 照常触发:capture 阶段先置收起,元素在本轮事件派发中仍在 DOM,冒泡阶段
-    // 的行跳转/按钮处理器不受影响
+    // 异常面板为悬浮二级卡片:面板内部点击不收起;仅点击唤起胶囊与面板
+    // 以外的空白处收起(capture 阶段注册在 onMounted 首行,防接口失败中断注册)
     function onDocClick(ev) {
       if (!eventsOpen.value) return;
       const t = ev.target;
-      if (t.closest && t.closest(".event-fab")) return;
+      if (t.closest && (t.closest(".event-panel") || t.closest(".event-fab"))) return;
       eventsOpen.value = false;
     }
 
@@ -441,6 +439,12 @@ const app = createApp({
     async function clearEvents() {
       const r = await api("/events", { method: "DELETE" });
       ElMessage.success(`已清除 ${r.deleted} 条异常记录`);
+      loadEvents();
+    }
+    // 清除单条异常:逐条清理不影响其它记录;面板保持打开可继续清理
+    async function clearEvent(e) {
+      await api(`/events/${e.id}`, { method: "DELETE" });
+      ElMessage.success("已清除该条异常");
       loadEvents();
     }
     async function loadTasks() {
@@ -1000,7 +1004,7 @@ const app = createApp({
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       kwCount, cityLabel, statusSegments,
       platformLogo, onLogoError,
-      activeTagType, activeTip, clearEvents, openEvent,
+      activeTagType, activeTip, clearEvents, clearEvent, openEvent,
       switchPlatform, switchMode, startTask, stopTask, reloadJobs, setFit,
       viewTaskJobs, clearTaskFilter, onTaskPick, openTaskDialog, delTask,
       loadJobs,
