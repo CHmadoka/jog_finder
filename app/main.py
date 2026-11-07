@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -64,6 +66,60 @@ def _port_in_use(host: str, port: int, timeout: float = 1.0) -> bool:
         return s.connect_ex((host, port)) == 0
 
 
+def _install_console_binding() -> None:
+    """Windows:把服务进程的生命周期绑定到控制台窗口(仅 Windows 生效)。
+
+    背景:`启动.bat` 以 `start "job_finder-server" cmd /c "...python -m app.main & pause"`
+    弹出独立控制台窗口。部分终端宿主(如 Windows Terminal)关闭窗口时只终止直接子进程
+    cmd.exe,python 父子进程会成为孤儿继续监听端口,出现"窗口关了服务还在跑"。
+    这里做两层保险:
+    1. SetConsoleCtrlHandler:收到 CTRL_CLOSE/LOGOFF/SHUTDOWN 立即 os._exit,
+       避免优雅关闭流程(lifespan 清理)拖过系统 5 秒宽限期后被强杀留下残余连接;
+    2. 守护线程轮询 GetConsoleProcessList:控制台上挂载的进程数变少,说明宿主/壳进程
+       (cmd 或终端 shell)已消失,整个服务进程树立即退出(启动器壳会随子进程退出)。
+    分离启动(无控制台,如计划任务/服务方式)不启用守卫,避免误杀正常后台服务。
+    """
+    if os.name != "nt":
+        return
+    import ctypes
+    import threading
+
+    kernel32 = ctypes.windll.kernel32
+    if not kernel32.GetConsoleWindow():
+        return  # 无控制台(分离启动),不启用
+
+    CTRL_CLOSE_EVENT = 2
+    CTRL_LOGOFF_EVENT = 5
+    CTRL_SHUTDOWN_EVENT = 6
+    Handler = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+
+    def _on_ctrl(ctrl_type: int) -> int:
+        if ctrl_type in (CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT):
+            os._exit(0)
+        return 0  # 其他事件(Ctrl+C 等)交给 Python 默认处理,走优雅关闭
+
+    _on_ctrl_ref = Handler(_on_ctrl)  # 模块级持有引用,防止回调被 GC
+    _install_console_binding._handler_ref = _on_ctrl_ref
+    kernel32.SetConsoleCtrlHandler(_on_ctrl_ref, True)
+
+    def _console_pids() -> list[int]:
+        buf = (ctypes.c_uint * 64)()
+        got = kernel32.GetConsoleProcessList(buf, 64)
+        return list(buf[:got]) if got else []
+
+    initial_count = len(_console_pids())
+
+    def _watch() -> None:
+        while True:
+            time.sleep(1)
+            if len(_console_pids()) < initial_count:
+                logger.info("控制台窗口已关闭,服务进程退出")
+                os._exit(0)
+
+    threading.Thread(target=_watch, name="console-binding", daemon=True).start()
+    logger.info("控制台生命周期绑定已启用(初始挂载 %d 个进程)", initial_count)
+
+
 def main() -> None:
     import uvicorn
 
@@ -76,6 +132,9 @@ def main() -> None:
             "(单例模式,本次启动直接退出)"
         )
         return
+
+    # 生命周期绑定:控制台窗口关闭时,服务进程树必须一起退出。
+    _install_console_binding()
 
     uvicorn.run("app.main:app", host=config.HOST, port=config.PORT, reload=False)
 
