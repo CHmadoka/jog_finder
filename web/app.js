@@ -14,15 +14,16 @@ const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎
 // 1x/2x/3x 三档文件由 scripts/gen_logos.py 按 .plogo 的 CSS 尺寸生成,
 // 浏览器按屏幕像素比直接挑像素对齐的那张,不做运行时缩放(不会发虚)。
 // img2x:顶栏专用 —— 按钮悬停/选中会 transform 放大,固定用 2x 源图保证放大后仍锐利
-// bg:官方图标图块的**实测底色**(采样自 3x 图四角,gen_logos 裁剪后边缘即真实背景),
-//     顶栏品牌主题色与文字徽标回退底色共用同一值;51job 图块为对角渐变,背景值用渐变串
+// bg:平台品牌主题色 —— 顶栏品牌背景与文字徽标回退底色共用。
+// Boss 取徽标图块实测青绿;前程无忧/猎聘沿用经典品牌纯色(橙/红,二者明显区分,
+// 渐变铺满顶栏观感像渲染异常且橙色端与猎聘橙撞色,弃用)
 function logoSrcset(base) {
   return [`${base}.png 1x`, `${base}@2x.png 2x`, `${base}@3x.png 3x`].join(", ");
 }
 const PLATFORM_LOGOS = {
   boss: { img: "/assets/logo_boss.png", img2x: "/assets/logo_boss@2x.png", srcset: logoSrcset("/assets/logo_boss"), text: "B", bg: "#15b3b3" },
-  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", bg: "linear-gradient(135deg, #fc8f1c, #e7014b)" },
-  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", bg: "#ff6400" },
+  job51: { img: "/assets/logo_51job.png", img2x: "/assets/logo_51job@2x.png", srcset: logoSrcset("/assets/logo_51job"), text: "51", bg: "#ff6000" },
+  liepin: { img: "/assets/logo_liepin.png", img2x: "/assets/logo_liepin@2x.png", srcset: logoSrcset("/assets/logo_liepin"), text: "猎", bg: "#d8262c" },
 };
 const SearchIcon = ElementPlusIconsVue.Search;
 const RefreshIcon = ElementPlusIconsVue.Refresh;
