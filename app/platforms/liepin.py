@@ -152,9 +152,7 @@ class LiepinPlatform(BasePlatform):
 
     async def _raise_if_verify(self, page: Page) -> None:
         if await self._is_verify_page(page):
-            raise AntiBot(
-                "猎聘触发安全验证,任务已暂停。请在浏览器中完成验证后重新开始任务(已抓岗位自动跳过)"
-            )
+            raise AntiBot("触发安全验证,已中止;请在浏览器完成验证后重试")
 
     # ---------- 搜索 ----------
     def _search_url(self, city: str, keyword: str, page_num: int) -> str:
@@ -316,10 +314,7 @@ class LiepinPlatform(BasePlatform):
         budget = self._budget
         if budget is not None:
             if budget.details_left <= 0:
-                raise BudgetExhausted(
-                    f"详情页预算耗尽({budget.details} 个),任务优雅收尾:"
-                    "剩余岗位下次任务自动继续(已入库自动跳过)"
-                )
+                raise BudgetExhausted(f"详情页预算耗尽(上限 {budget.details} 个)")
             budget.take_detail()
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
@@ -350,10 +345,7 @@ class LiepinPlatform(BasePlatform):
             # - 页面无响应/被清空 → 风控未识别或中断,自动中止任务(防止对异常状态连发);
             # - 平台正常响应但岗位失效(重定向)→ 视为已下线,跳过。
             if "about:blank" in (page.url or "") or not await page_responsive(page):
-                raise AntiBot(
-                    f"猎聘详情页无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未落地): {draft.title}。"
-                    "任务已自动中止,请人工检查浏览器后重试"
-                )
+                raise AntiBot("详情页无响应(疑似风控),已中止;请检查浏览器后重试")
             # 单次导航即定论,不做二次硬闯(反复刷新加重风控)
             logger.warning("猎聘详情落地异常(视为已下线,跳过): %s -> %s", draft.title, (page.url or "")[:120])
             draft.raw["offline"] = True
@@ -450,7 +442,7 @@ class LiepinPlatform(BasePlatform):
                 url = self._search_url(city, keyword, page_num)
                 self._search_ctx["referer"] = url    # 详情 referer 跟随当前列表页
                 if budget is not None and budget.pages_left <= 0:
-                    raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
+                    raise BudgetExhausted(f"列表页预算耗尽(上限 {budget.pages} 页)")
                 if progress:
                     progress(f"打开第 {page_num} 页: {keyword}@{city or '全国'}")
                 # 导航驱动 + 响应监听:页面自己发的签名请求,捕获响应拿结构化数据。
@@ -487,10 +479,7 @@ class LiepinPlatform(BasePlatform):
                 if data is None and not await page_responsive(page):
                     # 3 次静默重试仍捕获失败,且页面无响应:风控未识别或页面中断,
                     # 自动中止任务(防止对异常状态连发导航)
-                    raise AntiBot(
-                        f"猎聘页面无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未恢复): {keyword}@{city or '全国'}。"
-                        "任务已自动中止,请人工检查浏览器后重试"
-                    )
+                    raise AntiBot("页面无响应(疑似风控),已中止;请检查浏览器后重试")
                 if data is not None:                    drafts = await self._parse_list_json(data, city, warn)
                 else:
                     await self._wait_list(page)

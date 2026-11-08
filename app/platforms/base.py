@@ -75,8 +75,8 @@ class BasePlatform(ABC):
     detail_url_marker: str = ""
     # 会话节奏器(防风控):以危险率模型插入长休息(模拟真人离开/阅读)。
     # 每平台一个适配器实例且每平台仅一个并发任务,类级共享安全。
-    _page_pacer: SessionPacer = SessionPacer(label="翻页")
-    _detail_pacer: SessionPacer = SessionPacer(batch=(8, 15), label="详情页")
+    _page_pacer: SessionPacer = SessionPacer()
+    _detail_pacer: SessionPacer = SessionPacer(batch=(8, 15))
     # 会话上下文(任务启动时注入,补全/修复路径前置清空):
     # _budget 单任务请求预算;_search_ctx 携带"列表来路"(详情页 referer 模拟真人点击链)。
     _budget: SessionBudget | None = None

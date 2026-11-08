@@ -499,14 +499,13 @@ class Scheduler:
         risk_hits = await asyncio.to_thread(_db_count_recent_risk, platform)
         if risk_hits >= 3:
             raise ValueError(
-                f"{plat.name} 近 24 小时已触发 {risk_hits} 次风控,账户风险分较高,"
-                "建议冷却 48 小时后再抓取;确需立即重试,请先在异常面板清除对应记录"
+                f"{plat.name} 近24小时已触发{risk_hits}次风控,建议冷却48小时再抓;"
+                "如需立即重试,请先清除异常面板中的风控记录"
             )
         budget_scale = {0: 1.0, 1: 0.5, 2: 0.25}[min(risk_hits, 2)]
         budget = SessionBudget(
             pages=max(int(config.SESSION_PAGE_BUDGET * budget_scale), 4),
             details=max(int(config.SESSION_DETAIL_BUDGET * budget_scale), 6),
-            label=plat.name,
         )
         if budget_scale < 1.0:
             snapshot["budget_scale"] = budget_scale
@@ -606,7 +605,7 @@ class Scheduler:
                         # 等待人工验证等环节因用户停止而抛出:按手动停止收尾
                         status, message = "stopped", "用户手动停止"
                     else:
-                        status, message = "error", f"触发风控: {exc}"
+                        status, message = "error", str(exc)
                     break
                 except LoginRequired as exc:
                     status, message = "error", str(exc)
@@ -697,10 +696,7 @@ class Scheduler:
         # 对象不进快照/DB,只随本任务内存传递)。触发过风控时预算已按次数折减。
         if budget is not None:
             snap.setdefault("extras", {})["budget"] = budget
-            progress(
-                f"单会话安全预算:列表页 ≤{budget.pages} 页、详情页 ≤{budget.details} 个"
-                "(达限优雅收尾,剩余岗位下次任务自动继续)"
-            )
+            progress(f"会话预算:列表页≤{budget.pages},详情页≤{budget.details}(达限优雅收尾)")
 
         status, message = "done", ""
         skip_stats: dict[str, int] = {}
@@ -819,18 +815,19 @@ class Scheduler:
         except BudgetExhausted as exc:
             # 预算耗尽是"优雅收尾"而非错误:按 done 收尾,已抓数据完整保留;
             # 未处理岗位下次任务自动继续(已入库自动跳过,重复成本为零)
-            status, message = "done", f"已达单会话安全预算,任务收尾: {exc}"
+            status, message = "done", f"已达单会话安全预算({exc}),剩余岗位下次任务自动继续"
             progress(message)
         except AntiBot as exc:
             if stop.is_set():
                 # 等待人工验证等环节因用户停止而抛出:按手动停止收尾,不报错不弹窗
                 status, message = "stopped", "用户手动停止"
             else:
-                status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
+                # AntiBot 消息自身已是凝练的"原因+动作"短句,不再叠加前缀/建议尾巴
+                status, message = "error", str(exc)
                 # 风控中断同样落异常面板:任务结束即弹窗提示,面板提供可追溯记录
                 await asyncio.to_thread(
                     _db_add_events, platform,
-                    [{"message": f"任务{task_id}风控中断: {message}", "url": plat.home_url}],
+                    [{"message": f"任务{task_id}风控中断:{exc}", "url": plat.home_url}],
                     level="error",
                 )
         except Exception as exc:  # noqa: BLE001

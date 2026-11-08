@@ -158,12 +158,10 @@ class SessionPacer:
     不重置):只会更保守,无副作用。
     """
 
-    def __init__(self, *, batch: tuple[int, int] = (2, 4), idle: tuple[float, float] = (15, 40),
-                 label: str = "翻页") -> None:
+    def __init__(self, *, batch: tuple[int, int] = (2, 4), idle: tuple[float, float] = (15, 40)) -> None:
         mean_batch = max((batch[0] + batch[1]) / 2, 1.0)
         self._hazard = 1.0 / mean_batch        # 每 tick 触发休息的概率(无记忆)
         self.idle = idle
-        self.label = label
 
     async def tick(self, platform: str, progress=None, should_stop=None) -> None:
         """每完成一页/一个岗位调用一次;按危险率随机触发一次长休息(可被停止打断)。"""
@@ -175,7 +173,7 @@ class SessionPacer:
             min(hi * 3, 120.0),
         )
         if progress:
-            progress(f"防风控会话休息 {wait:.0f} 秒({self.label}间隙,模拟真人离开后返回)")
+            progress(f"会话休息 {wait:.0f}s(防风控)")
         await interruptible_sleep(wait, should_stop)
 
 
@@ -188,10 +186,9 @@ class SessionBudget:
     下次任务自动继续(已入库岗位自动跳过,重复成本为零)。
     """
 
-    def __init__(self, *, pages: int, details: int, label: str = "") -> None:
+    def __init__(self, *, pages: int, details: int) -> None:
         self.pages = max(int(pages), 1)
         self.details = max(int(details), 1)
-        self.label = label
         self.used_pages = 0
         self.used_details = 0
 

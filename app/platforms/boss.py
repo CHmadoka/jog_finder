@@ -52,10 +52,7 @@ _VERIFY_TEXT_RE = re.compile(r"安全验证|安全挑战|拖动滑块|验证码"
 # (实测:被限流后每 ~5 秒刷新一次受限页,持续加重风控)。
 _RESTRICTED_URL_RE = re.compile(r"/web/passport/zp/403\.html|403\.html\?code=")
 _RESTRICTED_TEXT_RE = re.compile(r"访问受限|访问过于频繁|请求过于频繁|操作过于频繁")
-_RESTRICTED_MSG = (
-    "Boss 访问受限(403/code=32):抓取频率过高被平台限流,任务已立即中止。"
-    "请等待一段时间(建议 30 分钟以上)后,在浏览器中确认可正常打开职位页再重新开始任务"
-)
+_RESTRICTED_MSG = "访问受限(限流),已中止;请等 30 分钟并在浏览器确认可打开职位页后再重试"
 # 详情页结构特征:存在这些区块即说明岗位内容正常渲染,绝非验证页
 _DETAIL_DOM_RE = ".job-sec-text, .job-banner, .job-scribe, .detail-content"
 # HR 活跃文案(实测详情页名片区)
@@ -249,10 +246,7 @@ class BossPlatform(BasePlatform):
     async def is_logged_in(self, page: Page) -> bool:
         ok, page = await self._ensure_on_domain(page)
         if not ok:
-            raise AntiBot(
-                "Boss 页面未能加载(浏览器已尝试自动重启)。"
-                "请在浏览器中手动打开 zhipin.com 确认可访问后重试"
-            )
+            raise AntiBot("页面未能加载,已中止;请在浏览器手动打开 zhipin.com 确认后重试")
         if "/web/user/?ka=header-login" in page.url or re.search(r"login", page.url):
             return False
         # 以页面登录 UI 为准:游客态搜索接口也可能返回 code=0,不能作为已登录依据
@@ -333,11 +327,10 @@ class BossPlatform(BasePlatform):
         set_verify_wait(self.id, True)
         try:
             if progress:
-                progress("⚠ 触发人机验证,已暂停等待人工完成:请在浏览器窗口完成滑块/验证码,"
-                         "通过后任务自动继续(每 5 秒检测一次,不会刷新页面)")
+                progress("⚠ 人机验证:请在浏览器完成滑块/验证码,通过后自动继续(每5秒检测,不刷新页面)")
             while True:
                 if should_stop is not None and should_stop():
-                    raise AntiBot("等待人工验证期间用户停止任务")
+                    raise AntiBot("用户在等待验证时停止任务")
                 await asyncio.sleep(5)
                 try:
                     if not await self._is_verify_page(page):
@@ -345,7 +338,7 @@ class BossPlatform(BasePlatform):
                         # 立即恢复高频抓取极易二次触发
                         cooldown = random.uniform(20, 40)
                         if progress:
-                            progress(f"人工验证已通过,冷却 {cooldown:.0f} 秒后继续抓取")
+                            progress(f"验证已通过,冷却 {cooldown:.0f}s 后继续")
                         await interruptible_sleep(cooldown, should_stop)
                         if progress:
                             progress("冷却完成,继续抓取")
@@ -418,10 +411,7 @@ class BossPlatform(BasePlatform):
         budget = self._budget
         if budget is not None:
             if budget.details_left <= 0:
-                raise BudgetExhausted(
-                    f"详情页预算耗尽({budget.details} 个),任务优雅收尾:"
-                    "剩余岗位下次任务自动继续(已入库自动跳过)"
-                )
+                raise BudgetExhausted(f"详情页预算耗尽(上限 {budget.details} 个)")
             budget.take_detail()
         # 详情 URL 带 securityId/lid,防止 Boss 重定向到其他职位
         u = draft.url
@@ -476,10 +466,7 @@ class BossPlatform(BasePlatform):
             # - 平台正常响应但岗位失效(重定向到列表/首页)→ 视为已下线,跳过。
             # 全程不做二次导航硬闯(反复刷新加重风控)
             if "about:blank" in (page.url or "") or not await page_responsive(page):
-                raise AntiBot(
-                    f"详情页无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未落地): {draft.title}。"
-                    "可能存在未识别的风控或页面中断,任务已自动中止,请人工检查浏览器后重试"
-                )
+                raise AntiBot("详情页无响应(疑似风控),已中止;请检查浏览器后重试")
             logger.warning("Boss 详情落地页异常(视为已下线,跳过): %s -> %s", draft.title, page.url[:120])
             draft.raw["offline"] = True
             return
@@ -569,7 +556,7 @@ class BossPlatform(BasePlatform):
         """
         ok_onsite, page = await self._ensure_on_domain(page)
         if not ok_onsite:
-            raise AntiBot("Boss 页面未能加载,无法重建岗位参数,请在浏览器中手动打开 zhipin.com 后重试")
+            raise AntiBot("页面未能加载,无法重建岗位参数;请手动打开 zhipin.com 后重试")
         out: dict[str, dict] = {}
         kws = sorted({(k or "").strip() for k in jid2kw.values() if (k or "").strip()})
         for kw in kws:
@@ -630,18 +617,17 @@ class BossPlatform(BasePlatform):
             # 会真实导航回首页一次做"PV 配平"(见下)
             ok_onsite, page = await self._ensure_on_domain(page)
             if not ok_onsite:
-                raise AntiBot("Boss 页面未能加载(浏览器已自动重启过),请在浏览器中手动打开 zhipin.com 后重试")
+                raise AntiBot("页面未能加载(已自动重启浏览器),已中止;请手动打开 zhipin.com 后重试")
             if progress:
                 progress(f"接口直连采集「{keyword}」@{city or '全国'}(浏览器页面保持静止)")
             # 启动预热:静默停留 + 轻滚动,避免任务启动瞬间即高频发请求
             await warmup(page, self.id)
             if budget is not None and budget.pages_left <= 0:
-                raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
+                raise BudgetExhausted(f"列表页预算耗尽(上限 {budget.pages} 页)")
             res = await self._fetch_joblist(page, keyword or "数据", city_code, 1)
             if not res or res.get("code") != 0:
                 raise AntiBot(
-                    f"接口暂不可用(code={res.get('code') if res else '无响应'})。"
-                    "可能被限流或需要完成安全验证:请在浏览器中人工检查,稍后重新开始任务"
+                    f"接口不可用(code={res.get('code') if res else '无响应'},疑似限流或需安全验证),已中止;请检查浏览器后重试"
                 )
             if budget is not None:
                 budget.take_page()
@@ -665,7 +651,7 @@ class BossPlatform(BasePlatform):
                     if pv_left <= 0:
                         pv_left = random.randint(3, 6)
                         if progress:
-                            progress("配平会话形状:回首页浏览片刻(为接口请求伴生页面浏览)")
+                            progress("回首页浏览片刻(配平会话形状)")
                         try:
                             await page.goto(self.home_url, wait_until="domcontentloaded", timeout=20000)
                             await page.wait_for_timeout(random.randint(4000, 9000))
@@ -678,19 +664,16 @@ class BossPlatform(BasePlatform):
                     pass                      # 复用探测页结果(同参数,不重复请求)
                 else:
                     if budget is not None and budget.pages_left <= 0:
-                        raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
+                        raise BudgetExhausted(f"列表页预算耗尽(上限 {budget.pages} 页)")
                     res = await self._fetch_joblist(page, keyword, city_code, page_num)
                     if budget is not None:
                         budget.take_page()
                 if not res:
-                    raise AntiBot("接口无响应(页面可能正被风控重定向),任务已暂停,请稍后重试")
+                    raise AntiBot("接口无响应(疑似风控重定向),已中止;请检查浏览器后重试")
                 if res.get("code") != 0:
                     # 服务器明确拒绝:绝不重试连发(连发正是触发 _security_check 循环的原因)
                     code = res.get("code")
-                    raise AntiBot(
-                        f"接口返回拒绝码 code={code},任务已暂停。"
-                        "请在浏览器中人工检查(可能需要完成安全验证)后重新开始任务"
-                    )
+                    raise AntiBot(f"接口拒绝(code={code}),已中止;请在浏览器完成安全验证后重试")
                 if await self._is_verify_page(page):
                     await self._wait_manual_verify(page, progress=progress, should_stop=should_stop)
                     res = await self._fetch_joblist(page, keyword, city_code, page_num)

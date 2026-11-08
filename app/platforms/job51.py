@@ -261,11 +261,10 @@ class Job51Platform(BasePlatform):
         set_verify_wait(self.id, True)
         try:
             if progress:
-                progress("⚠ 前程无忧触发人机验证(Access Verification),已暂停等待人工完成:"
-                         "请在浏览器窗口完成验证,通过后任务自动继续(每 5 秒检测,不会刷新页面)")
+                progress("⚠ 人机验证(Access Verification):请在浏览器完成验证,通过后自动继续(每5秒检测,不刷新页面)")
             while True:
                 if should_stop is not None and should_stop():
-                    raise AntiBot("等待人工验证期间用户停止任务")
+                    raise AntiBot("用户在等待验证时停止任务")
                 await asyncio.sleep(5)
                 try:
                     if not await self._is_verify_page(page):
@@ -273,7 +272,7 @@ class Job51Platform(BasePlatform):
                         # 立即恢复高频抓取极易二次触发
                         cooldown = random.uniform(20, 40)
                         if progress:
-                            progress(f"人工验证已通过,冷却 {cooldown:.0f} 秒后继续抓取")
+                            progress(f"验证已通过,冷却 {cooldown:.0f}s 后继续")
                         await interruptible_sleep(cooldown, should_stop)
                         if progress:
                             progress("冷却完成,继续抓取")
@@ -367,10 +366,7 @@ class Job51Platform(BasePlatform):
         budget = self._budget
         if budget is not None:
             if budget.details_left <= 0:
-                raise BudgetExhausted(
-                    f"详情页预算耗尽({budget.details} 个),任务优雅收尾:"
-                    "剩余岗位下次任务自动继续(已入库自动跳过)"
-                )
+                raise BudgetExhausted(f"详情页预算耗尽(上限 {budget.details} 个)")
             budget.take_detail()
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
@@ -399,10 +395,7 @@ class Job51Platform(BasePlatform):
             # - 页面无响应/被清空 → 风控未识别或中断,自动中止任务(防止对异常状态连发);
             # - 平台正常响应但岗位失效(重定向)→ 视为已下线,跳过。
             if "about:blank" in (page.url or "") or not await page_responsive(page):
-                raise AntiBot(
-                    f"详情页无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未落地): {draft.title}。"
-                    "可能存在未识别的风控或页面中断,任务已自动中止,请人工检查浏览器后重试"
-                )
+                raise AntiBot("详情页无响应(疑似风控),已中止;请检查浏览器后重试")
             # 单次导航即定论,不做二次硬闯(反复刷新加重风控)
             logger.warning("51job 详情落地异常(视为已下线,跳过): %s -> %s", draft.title, (page.url or "")[:120])
             draft.raw["offline"] = True
@@ -525,10 +518,7 @@ class Job51Platform(BasePlatform):
                     logger.debug("捕获页面首屏响应失败(fetch 兜底): %s", str(exc)[:120])
                 await page.wait_for_timeout(2000)
             if "we.51job.com" not in (page.url or ""):
-                raise AntiBot(
-                    "前程无忧页面未能落在 we.51job.com 域(可能被重定向),"
-                    "请在浏览器中手动打开 we.51job.com 确认可访问后重试"
-                )
+                raise AntiBot("页面未落在搜索域(被重定向),已中止;请手动打开 we.51job.com 后重试")
             if "passport.51job.com" in (page.url or "") or re.search(r"/login", (page.url or "")):
                 raise LoginRequired("51job 搜索页跳转到登录页")
             await self._wait_if_verify(page, progress=progress, should_stop=should_stop)
@@ -547,7 +537,7 @@ class Job51Platform(BasePlatform):
                 # 详情 referer 跟随当前页对应搜索列表;页预算耗尽即优雅收尾
                 self._search_ctx["referer"] = self._search_url(city, keyword, page_num, extras)
                 if budget is not None and budget.pages_left <= 0:
-                    raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
+                    raise BudgetExhausted(f"列表页预算耗尽(上限 {budget.pages} 页)")
                 if progress:
                     progress(f"接口拉取第 {page_num} 页: {keyword}@{city or '全国'}")
                 if page_num == 1 and first_page_data is not None:
@@ -569,10 +559,7 @@ class Job51Platform(BasePlatform):
                     if progress:
                         progress(f"接口异常({msg}),静默等待后重试,第 {fail_streak}/{RETRY_ATTEMPTS} 次")
                     if fail_streak >= RETRY_ATTEMPTS:
-                        raise AntiBot(
-                            f"前程无忧接口连续 {RETRY_ATTEMPTS} 次失败({msg}),任务已自动中止。"
-                            "可能被限流或需要安全验证:请在浏览器中人工检查后重新开始任务"
-                        )
+                        raise AntiBot(f"接口连续{RETRY_ATTEMPTS}次失败({msg}),已中止;请检查浏览器后重试")
                     # 意外等待静默退避(不刷新页面):5~10 秒后重试当前页
                     await silent_backoff()
                     page_num -= 1  # 重试当前页

@@ -519,8 +519,8 @@ const app = createApp({
           if (v.verify_wait && !statuses[pid + "_vw"]) {
             ElNotification({
               title: "人机验证等待中",
-              message: `${platformOf(pid)} 触发人机验证,任务已暂停:请在浏览器窗口完成滑块/验证码,`
-                     + `通过后任务自动继续(每 5 秒只读检测,不会刷新页面、不会发起请求)`,
+              message: `${platformOf(pid)} 触发人机验证:请在浏览器完成验证,通过后自动继续`
+                     + `(每5秒只读检测,不刷新不发请求)`,
               type: "warning", duration: 0,
             });
           }
