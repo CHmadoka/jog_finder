@@ -135,6 +135,7 @@ class Job51Tests(unittest.TestCase):
             "hrName": "顾女士",
             "hrPosition": "人事部招聘专员",
             "hrIsOnline": False,
+            "hrOnlineLabelStatus": 3,
             "jobTags": ["5-8年", "本科", "java", "sql", "五险一金"],
             "jobDescribe": "岗位职责：1.测试",
             "isExpire": False,
@@ -153,6 +154,11 @@ class Job51Tests(unittest.TestCase):
         self.assertEqual(draft.company_scale, "150-500人")
         self.assertEqual(draft.hr_name, "顾女士")
         self.assertFalse(draft.hr_online)
+        # HR 活跃分档 3 → "本周活跃" 估算(now-7天,后缀"后"=真实活跃不早于该时刻)
+        self.assertEqual(draft.hr_active_text, "本周活跃")
+        self.assertTrue(draft.hr_active_at.endswith("后"))
+        est = datetime.strptime(draft.hr_active_at[:16], "%Y-%m-%d %H:%M")
+        self.assertLess(abs((est - (datetime.now() - timedelta(days=7))).total_seconds()), 60)
         self.assertEqual(draft.published_at, datetime(2026, 11, 6, 14, 27, 11))
         # 描述包含原文与技能标签(剔除与经验/学历重复的项)
         self.assertIn("岗位职责", draft.description)
@@ -172,6 +178,41 @@ class Job51Tests(unittest.TestCase):
         draft, warns = self.plat._draft_from_api({"jobId": "", "jobName": ""}, "上海")
         self.assertIsNone(draft)
         self.assertEqual(len(warns), 2)
+
+    def test_draft_from_api_hr_status(self):
+        """hrOnlineLabelStatus 分档 → 统一活跃估算(1=在线 2=今日活跃 3=本周活跃)。"""
+        from app.utils import parse_dt_loose
+
+        def within_minute(est, ref):
+            dt = parse_dt_loose(est)
+            return dt is not None and abs((dt - ref).total_seconds()) <= 60
+
+        now = datetime.now()
+        base = {"jobId": "1", "jobName": "x"}
+        # 分档 1:在线 → 估算 = 当前时刻(无后缀,active_label → "刚刚活跃")
+        draft, _ = self.plat._draft_from_api({**base, "hrIsOnline": True, "hrOnlineLabelStatus": 1}, "上海")
+        self.assertTrue(draft.hr_online)
+        self.assertEqual(draft.hr_active_text, "在线")
+        self.assertTrue(within_minute(draft.hr_active_at, now))
+        # 分档 2:今日活跃 → 日期型估算("YYYY-MM-DD 活跃")
+        draft, _ = self.plat._draft_from_api({**base, "hrIsOnline": False, "hrOnlineLabelStatus": 2}, "上海")
+        self.assertFalse(draft.hr_online)
+        self.assertEqual(draft.hr_active_text, "今日活跃")
+        self.assertEqual(draft.hr_active_at, now.strftime("%Y-%m-%d") + " 活跃")
+        # 分档 3:本周活跃 → now-7天 + "后"
+        draft, _ = self.plat._draft_from_api({**base, "hrIsOnline": False, "hrOnlineLabelStatus": 3}, "上海")
+        self.assertEqual(draft.hr_active_text, "本周活跃")
+        self.assertTrue(within_minute(draft.hr_active_at, now - timedelta(days=7)))
+        # 未知分档(超出映射)且离线:不伪造估算,留空回退发布时间判定
+        draft, _ = self.plat._draft_from_api({**base, "hrIsOnline": False, "hrOnlineLabelStatus": 9}, "上海")
+        self.assertEqual((draft.hr_active_at, draft.hr_active_text), ("", ""))
+        # 分档缺失但 hrIsOnline=true:按"在线"兜底
+        draft, _ = self.plat._draft_from_api({**base, "hrIsOnline": True}, "上海")
+        self.assertEqual(draft.hr_active_text, "在线")
+        self.assertTrue(within_minute(draft.hr_active_at, now))
+        # 分档为字符串数字:容错解析
+        draft, _ = self.plat._draft_from_api({**base, "hrIsOnline": False, "hrOnlineLabelStatus": "2"}, "上海")
+        self.assertEqual(draft.hr_active_text, "今日活跃")
 
     def test_search_url(self):
         u = self.plat._search_url("上海", "Java", 1, {})

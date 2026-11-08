@@ -8,7 +8,9 @@
   单页一次请求,风控暴露面最小;仅在描述缺失时打开详情页兜底(JSON-LD + DOM)
 - 翻页终止:接口 totalcount / 空页 / 页数上限
 - 风控:接口连续失败立即中止(AntiBot),绝不重试连发;验证页特征即时判定
-- 活跃度:51job 无 HR 活跃文案,判定走精确发布时间(JOB_PUBLISH_DAYS 窗口);
+- 活跃度:51job PC 卡片只在 hrIsOnline=true 时渲染"在线"文案;接口另有
+  hrOnlineLabelStatus 活跃分档(1=在线/2=今日活跃/3=本周活跃,离线 HR 也有分档),
+  据此生成统一估算字符串存 hr_active_at(与 Boss/猎聘同构),未知分档留空回退发布时间;
   hrIsOnline 存 hr_online 布尔供界面展示
 """
 from __future__ import annotations
@@ -26,6 +28,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from ..utils import (
     RETRY_ATTEMPTS,
+    active_estimate_from_text,
     detail_delay,
     global_nav_gate,
     human_delay,
@@ -49,6 +52,13 @@ logger = logging.getLogger(__name__)
 # 与之对齐,否则翻页间会出现 21~N 条的漏采裂缝)
 PAGE_SIZE = 20
 
+# HR 活跃分档:search-pc 条目的 hrOnlineLabelStatus(APP 端 IM 活跃分档,PC 搜索卡
+# 不直接消费——PC 只在 hrIsOnline=true 时渲染"在线",离线仅展示 hrLabels 行为标签)。
+# 2026-11-08 实测 110 样本仅见 1/2/3,且 1 与 hrIsOnline 完全同真;分档文案依据:
+# 2 的标签里出现平台自有文案"今日活跃",3 的标签以"本周人才搜索N次"为主。
+# 未知分档不伪造估算(留空,活跃窗口回退发布时间判定);已有数据不做回填。
+_HR_STATUS_TEXT = {1: "在线", 2: "今日活跃", 3: "本周活跃"}
+
 _ID_PATTERNS = [
     r"/(\d{6,})\.html",
     r"/all/(\d+)\.html",
@@ -62,6 +72,23 @@ def _extract_job_id(url: str) -> str:
         if m:
             return m.group(1)
     return re.sub(r"\W+", "_", url)[-60:]
+
+
+def _hr_active_of(j: dict) -> tuple[str, str]:
+    """条目 HR 活跃 → (估算字符串, 平台原文)。
+
+    优先 hrOnlineLabelStatus 分档;分档未知但 hrIsOnline 为真时按"在线"兜底
+    (布尔真=当前在线,与分档 1 同义);两者皆无返回 ("", "")。
+    """
+    try:
+        text = _HR_STATUS_TEXT.get(int(j.get("hrOnlineLabelStatus")), "")
+    except (TypeError, ValueError):
+        text = ""
+    if not text and j.get("hrIsOnline"):
+        text = "在线"
+    if not text:
+        return "", ""
+    return active_estimate_from_text(text), text
 
 
 def _salary_from_ld(sal) -> str:
@@ -329,6 +356,7 @@ class Job51Platform(BasePlatform):
             return None, warns
         if not desc:
             warns.append("列表接口未返回职位描述(jobDescribe),将尝试详情页兜底(平台可能已改版)")
+        hr_est, hr_text = _hr_active_of(j)
         draft = JobDraft(
             platform_job_id=jid,
             title=title,
@@ -345,6 +373,8 @@ class Job51Platform(BasePlatform):
             hr_name=str(j.get("hrName") or ""),
             hr_title=str(j.get("hrPosition") or ""),
             hr_online=bool(j.get("hrIsOnline")),
+            hr_active_at=hr_est,
+            hr_active_text=hr_text,
             industry=industry,
             company_scale=str(j.get("companySizeString") or ""),
             published_at=parse_relative_time(str(j.get("issueDateString") or "")),
