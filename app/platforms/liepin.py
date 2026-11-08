@@ -38,6 +38,7 @@ from ..utils import (
     page_responsive,
     parse_relative_time,
     patient_poll,
+    save_raw,
     save_snapshot,
     silent_backoff,
     warmup,
@@ -357,6 +358,7 @@ class LiepinPlatform(BasePlatform):
         await self._raise_if_verify(page)
         await page.wait_for_timeout(1500)
         # JSON-LD(schema.org JobPosting,实测存在且描述完整)
+        ld_list: list = []
         try:
             ld_list = await page.evaluate(
                 "() => Array.from(document.querySelectorAll('script[type=\"application/ld+json\"]')).map(s => s.textContent)"
@@ -377,6 +379,14 @@ class LiepinPlatform(BasePlatform):
                             draft.published_at = parse_relative_time(str(o["datePosted"])) or draft.published_at
         except Exception as exc:  # noqa: BLE001
             logger.debug("猎聘 JSON-LD 解析失败: %s", exc)
+        # 原始数据留存:JSON-LD 原文 + 解析结果,排查描述/活跃文案缺失无需重开页面
+        save_raw(self.id, "detail", {
+            "jsonld": ld_list or [],
+            "parsed": {
+                "title": draft.title or "", "description": (draft.description or "")[:6000],
+                "hr_name": draft.hr_name or "", "hr_active_text": draft.hr_active_text or "",
+            },
+        }, {"job_id": draft.platform_job_id, "url": draft.url or "", "page_url": (page.url or "")[:300]})
         # DOM 兜底:描述与 HR 区块
         if not draft.description:
             try:
@@ -464,6 +474,11 @@ class LiepinPlatform(BasePlatform):
                             resp = await ri.value
                             body = await resp.text()
                         d = json.loads(body)
+                        # 原始数据留存:捕获的搜索接口完整响应(拒绝形态同样留存)
+                        save_raw(self.id, "search", d, {
+                            "keyword": keyword, "city": city, "page": page_num,
+                            "url": url[:300],
+                        })
                         if d.get("flag") == 1:
                             data = d
                         break   # flag!=1 是接口拒绝:不重试连发,交 DOM 兜底

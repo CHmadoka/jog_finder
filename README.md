@@ -42,6 +42,7 @@ Copy-Item .env.example .env          # 按需修改配置
 | `HR_ACTIVE_DAYS` / `JOB_PUBLISH_DAYS` | 活跃度窗口天数,默认 7(本仓库 `.env` 配的 30) |
 | `DELAY_MIN/MAX`、`MAX_PAGES_PER_TASK` | 防风控节奏兜底与单任务页数上限(前端「随机间隔」设置框按任务覆盖延迟) |
 | `SESSION_PAGE_BUDGET`、`SESSION_DETAIL_BUDGET` | 单会话安全预算(默认 40 页/120 详情),达限优雅收尾;触发风控自动按次数折减 |
+| `RAW_CAPTURE`、`RAW_RETENTION_DAYS`、`RAW_MAX_PER_PLATFORM` | 原始数据留存:解析前的平台原始响应/提取产物落盘 `data/raw/{平台}/*.json`(信封含时间/词条/页码),排查字段语义与结构变化直接翻文件;默认开启,保留 7 天/每平台 300 份,0=关闭对应限制 |
 
 > Chrome 136+ 禁止对默认用户目录开启 CDP,因此本工具使用**独立 profile**:
 > 首次拉起的浏览器窗口中,请手动登录三个平台,登录态会持久保存,之后无需重复登录。
@@ -285,6 +286,9 @@ SQLite(job_finder.db) ←──── 过滤引擎(活跃度/查重/规则备注
 - `app/filter/`:判定链路——`activity.py` 活跃度窗口(唯一会拒绝入库的)、
   `rules.py` 关键词规则(只写备注)、`__init__.py` 行业偏好与备注拼装
 - 解析失败会自动把页面快照存到 `data/snapshots/`,便于修复选择器
+- 每次列表/详情解析前,平台**原始数据**自动留存到 `data/raw/{平台}/`(JSON 信封:
+  时间/词条/城市/页码 + 完整原始响应或提取产物,按天与数量滚动清理)。排查字段
+  语义、接口结构变化或风控形态时直接翻文件,不必再针对平台重放测试
 
 ## 运行测试
 

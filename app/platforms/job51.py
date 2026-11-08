@@ -37,6 +37,7 @@ from ..utils import (
     page_responsive,
     parse_relative_time,
     patient_poll,
+    save_raw,
     save_snapshot,
     silent_backoff,
     warmup,
@@ -187,10 +188,17 @@ class Job51Platform(BasePlatform):
                 # 全局导航闸:多平台并发时控制叠加请求率(同 IP 总频率)
                 await global_nav_gate()
                 raw = await page.evaluate(self._fetch_js(self._api_qs(keyword, area, page_num)))
+                meta = {
+                    "keyword": keyword, "city_code": area, "page": page_num,
+                    "url": (page.url or "")[:300],
+                }
                 if raw and raw.strip().startswith("{"):
-                    return json.loads(raw)
+                    d = json.loads(raw)
+                    save_raw(self.id, "search", d, meta)
+                    return d
                 # 非 JSON:多为风控/异常页,直接返回 None
                 logger.warning("51job 接口非 JSON 响应(第 %d 次): %s", i + 1, str(raw)[:120])
+                save_raw(self.id, "search_nonjson", {"raw_head": str(raw)[:20000]}, meta)
                 return None
             except PWTimeout:
                 return None
@@ -214,6 +222,10 @@ class Job51Platform(BasePlatform):
                 await global_nav_gate()
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             d = json.loads(await (await ri.value).text())
+            save_raw(self.id, "search", d, {
+                "keyword": keyword, "city_code": area, "page": page_num,
+                "city": city, "url": url[:300], "via": "page_pv",
+            })
             if str(d.get("status")) == "1":
                 return d
             logger.warning("51job 搜索页 PV 响应异常: status=%s", d.get("status"))
@@ -437,6 +449,7 @@ class Job51Platform(BasePlatform):
         await self._wait_if_verify(page, progress=progress, should_stop=should_stop)
         await page.wait_for_timeout(1500)
         # JSON-LD
+        ld: list = []
         try:
             ld = await page.evaluate(
                 "() => Array.from(document.querySelectorAll('script[type=\"application/ld+json\"]')).map(s => s.textContent)"
@@ -479,6 +492,14 @@ class Job51Platform(BasePlatform):
                     draft.title = ((await el.text_content()) or "").strip()
             except Exception:  # noqa: BLE001
                 pass
+        # 原始数据留存:JSON-LD 原文 + 解析后字段,排查"描述为何缺失"无需重开页面
+        save_raw(self.id, "detail", {
+            "jsonld": ld or [],
+            "parsed": {
+                "title": draft.title or "", "description": (draft.description or "")[:6000],
+                "salary": draft.salary or "", "published_at": str(draft.published_at or ""),
+            },
+        }, {"job_id": draft.platform_job_id, "url": draft.url or "", "page_url": (page.url or "")[:300]})
         # 阅读仿真:停留∝描述长度(落地校验/解析耗时已计入,只补差额),
         # 滚动浏览后再离开——零阅读访问(停留与内容无关)是强自动化签名
         try:
@@ -540,6 +561,10 @@ class Job51Platform(BasePlatform):
                         resp = await ri.value
                         body = await resp.text()
                     d = json.loads(body)
+                    save_raw(self.id, "search", d, {
+                        "keyword": keyword, "city_code": area, "city": city,
+                        "page": 1, "url": first_url[:300], "via": "first_screen",
+                    })
                     if str(d.get("status")) == "1":
                         first_page_data = d
                     else:

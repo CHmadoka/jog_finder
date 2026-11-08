@@ -31,6 +31,7 @@ from ..utils import (
     page_responsive,
     patient_call,
     patient_poll,
+    save_raw,
     save_snapshot,
     warmup,
 )
@@ -191,6 +192,12 @@ class BossPlatform(BasePlatform):
                 "Boss joblist fetch 静默重试 %d 次仍失败: %s", RETRY_ATTEMPTS, str(raw)[:120]
             )
             return {}
+        # 原始数据留存:成功与拒绝码形态都存(拒绝码正是风控排查样本)
+        if isinstance(raw, dict):
+            save_raw(self.id, "search", raw, {
+                "keyword": query, "city": city, "page": page_num,
+                "url": (page.url or "")[:300],
+            })
         return raw
 
     async def _decode_map(self, page: Page) -> dict:
@@ -505,6 +512,12 @@ class BossPlatform(BasePlatform):
                 })"""
             ) or {}
             map_ = await self._decode_map(page)
+            # 原始数据留存:解码前的 evaluate 产物与字形解码映射——薪资乱码/字段
+            # 缺失类问题直接翻文件定位,不必重开详情页复测
+            save_raw(self.id, "detail", {"evaluate": data, "decodeMap": map_}, {
+                "job_id": draft.platform_job_id, "url": draft.url or "",
+                "page_url": (page.url or "")[:300],
+            })
             secs = [decode_text(s, map_) for s in (data.get("secs") or [])]
             head = decode_text(data.get("head") or "", map_)
             body = decode_text(data.get("body") or "", map_)

@@ -42,6 +42,12 @@ class Config:
     SESSION_PAGE_BUDGET: int = _env_int("SESSION_PAGE_BUDGET", 40)
     SESSION_DETAIL_BUDGET: int = _env_int("SESSION_DETAIL_BUDGET", 120)
 
+    # 原始数据留存:解析前边界的平台响应/提取产物落盘 JSON,供随时排查字段
+    # 语义与结构变化(不必再针对平台重放测试)。RAW_CAPTURE=0 关闭。
+    RAW_CAPTURE: int = _env_int("RAW_CAPTURE", 1)
+    RAW_RETENTION_DAYS: int = _env_int("RAW_RETENTION_DAYS", 7)        # 保留天数,0=不限
+    RAW_MAX_PER_PLATFORM: int = _env_int("RAW_MAX_PER_PLATFORM", 300)  # 每平台文件数上限,0=不限
+
     # 服务
     HOST: str = os.getenv("HOST", "127.0.0.1")
     PORT: int = _env_int("PORT", 8765)
@@ -50,12 +56,13 @@ class Config:
     DATA_DIR: Path = BASE_DIR / "data"
     DB_PATH: Path = DATA_DIR / "job_finder.db"
     SNAPSHOT_DIR: Path = DATA_DIR / "snapshots"
+    RAW_DIR: Path = DATA_DIR / "raw"
     EXPORT_DIR: Path = DATA_DIR / "exports"
     WEB_DIR: Path = BASE_DIR / "web"
 
     @classmethod
     def ensure_dirs(cls) -> None:
-        for p in (cls.DATA_DIR, cls.SNAPSHOT_DIR, cls.EXPORT_DIR, cls.DB_PATH.parent):
+        for p in (cls.DATA_DIR, cls.SNAPSHOT_DIR, cls.RAW_DIR, cls.EXPORT_DIR, cls.DB_PATH.parent):
             p.mkdir(parents=True, exist_ok=True)
 
     @property

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import random
@@ -335,6 +336,60 @@ def save_snapshot(platform: str, name: str, html: str) -> Path:
     path.write_text(html, encoding="utf-8")
     logger.warning("已保存页面快照: %s", path)
     return path
+
+
+# ---------- 原始数据留存 ----------
+# 在"平台响应 → 解析器"边界落盘原始 JSON(data/raw/{platform}/),字段语义或
+# 结构变化时直接翻文件排查,不必再针对平台重放测试。每次写入后顺手清理
+# (保留天数 + 每平台上限);任何落盘异常只告警,绝不影响抓取主流程。
+def save_raw(platform: str, kind: str, body, meta: dict | None = None) -> Path | None:
+    """留存一份平台原始数据,返回文件路径;关闭/失败返回 None。
+
+    body: 可 JSON 序列化的原始数据(接口响应 dict / 提取产物 dict / 截断文本 dict)。
+    meta: 上下文(词条/城市/页码/URL 等),写入信封顶层便于检索。
+    """
+    if not config.RAW_CAPTURE:
+        return None
+    try:
+        d = config.RAW_DIR / platform
+        d.mkdir(parents=True, exist_ok=True)
+        now = datetime.now()
+        name = f"{kind}_{now.strftime('%Y%m%d_%H%M%S')}_{random.randint(16 ** 3, 16 ** 4 - 1):x}.json"
+        envelope = {
+            "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "platform": platform,
+            "kind": kind,
+            "meta": dict(meta or {}),
+            "body": body,
+        }
+        path = d / name
+        path.write_text(json.dumps(envelope, ensure_ascii=False, default=str), encoding="utf-8")
+        _cleanup_raw(d)
+        return path
+    except Exception as exc:  # noqa: BLE001  (留存失败不影响抓取)
+        logger.warning("原始数据留存失败(%s/%s): %s", platform, kind, str(exc)[:120])
+        return None
+
+
+def _cleanup_raw(platform_dir: Path) -> None:
+    """按 mtime 保留最新 N 份且未过期的文件,其余删除(单平台目录,文件量小)。"""
+    try:
+        files = sorted(platform_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+    keep = config.RAW_MAX_PER_PLATFORM if config.RAW_MAX_PER_PLATFORM > 0 else len(files)
+    cutoff = (
+        (datetime.now() - timedelta(days=config.RAW_RETENTION_DAYS)).timestamp()
+        if config.RAW_RETENTION_DAYS > 0
+        else None
+    )
+    for i, p in enumerate(files):
+        expired = cutoff is not None and p.stat().st_mtime < cutoff
+        if i >= keep or expired:
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 _CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
