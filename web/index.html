@@ -77,6 +77,11 @@
     .top-plat {
       position: relative; cursor: pointer; border-radius: 8px;
       transition: transform .15s; user-select: none;
+      /* flex + 行高归零:plogo(30px inline-flex)在 block 容器的行盒中受字体
+         strut 撑出额外 leading,容器比徽标高 2~4px——状态环(box-shadow 画在
+         容器外缘)与徽标间出现缝隙("绿框不贴合 logo");flex 布局让容器尺寸
+         严格等于徽标 30×30,环完全贴合 */
+      display: flex; line-height: 0;
     }
     .top-plat:hover, .top-plat.active { transform: scale(1.15); }
     /* 未选中且未悬停:徽标半透明,悬停/选中恢复不透明;
