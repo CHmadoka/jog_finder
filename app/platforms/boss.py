@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 from typing import AsyncIterator
 from urllib.parse import quote
@@ -21,12 +22,14 @@ from ..utils import (
     RETRY_ATTEMPTS,
     active_estimate_from_text,
     detail_delay,
+    global_nav_gate,
     human_delay,
-    human_scroll,
+    interruptible_sleep,
     page_responsive,
     patient_call,
     patient_poll,
     save_snapshot,
+    warmup,
 )
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
@@ -173,6 +176,8 @@ class BossPlatform(BasePlatform):
         import json as _json
 
         async def _once():
+            # 全局导航闸:多平台并发时控制叠加请求率(同 IP 总频率)
+            await global_nav_gate()
             raw = await page.evaluate(self._joblist_js(query, city, page_num))
             if isinstance(raw, str):
                 raw = _json.loads(raw)
@@ -333,8 +338,14 @@ class BossPlatform(BasePlatform):
                 await asyncio.sleep(5)
                 try:
                     if not await self._is_verify_page(page):
+                        # 验证通过后先冷却再继续:刚通过验证的会话被平台重点观察,
+                        # 立即恢复高频抓取极易二次触发
+                        cooldown = random.uniform(20, 40)
                         if progress:
-                            progress("人工验证已通过,继续抓取")
+                            progress(f"人工验证已通过,冷却 {cooldown:.0f} 秒后继续抓取")
+                        await interruptible_sleep(cooldown, should_stop)
+                        if progress:
+                            progress("冷却完成,继续抓取")
                         return
                 except Exception:  # noqa: BLE001  (渲染中的瞬态异常:继续静默观察)
                     pass
@@ -412,6 +423,10 @@ class BossPlatform(BasePlatform):
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒)。固定约 1s 的均匀高频访问
         # 是 Boss 限流(code=32 访问受限)的主因,拉大并随机化间隔模拟人工浏览
         await detail_delay(self.id)
+        # 批次长休息:每 8~15 个详情页插入一次 15~40 秒会话休息(防风控)
+        await self._detail_pacer.tick(self.id, progress=progress, should_stop=should_stop)
+        # 全局导航闸:多平台并发时控制叠加请求率
+        await global_nav_gate()
         # 用户已请求停止:不再发起任何导航(停止指令即时生效)
         if should_stop is not None and should_stop():
             return
@@ -585,6 +600,8 @@ class BossPlatform(BasePlatform):
                 raise AntiBot("Boss 页面未能加载(浏览器已自动重启过),请在浏览器中手动打开 zhipin.com 后重试")
             if progress:
                 progress(f"接口直连采集「{keyword}」@{city or '全国'}(浏览器页面保持静止)")
+            # 启动预热:静默停留 + 轻滚动,避免任务启动瞬间即高频发请求
+            await warmup(page, self.id)
             res = await self._fetch_joblist(page, keyword or "数据", city_code, 1)
             if not res or res.get("code") != 0:
                 raise AntiBot(
@@ -600,6 +617,8 @@ class BossPlatform(BasePlatform):
                     return
                 if page_num > 1:
                     await human_delay(self.id)
+                    # 批次长休息:每 2~4 页插入一次 15~40 秒会话休息(防风控)
+                    await self._page_pacer.tick(self.id, progress=progress, should_stop=should_stop)
                 if progress:
                     progress(f"接口拉取第 {page_num} 页: {keyword}@{city or '全国'}")
                 res = await self._fetch_joblist(page, keyword, city_code, page_num)

@@ -8,6 +8,8 @@ from typing import AsyncIterator, Awaitable, Callable
 
 from playwright.async_api import Page
 
+from ..utils import SessionPacer
+
 ProgressCallback = Callable[[str], None]
 SkipCheck = Callable[[str], Awaitable[bool]]
 # 解析层异常回调: (消息列表, 相关岗位URL)。用于"字段抓取有误/未正常写入"记录到异常面板。
@@ -67,6 +69,10 @@ class BasePlatform(ABC):
     home_prefix: str = ""
     # 详情页 URL 特征(如 Boss 的 /job_detail/):复用载体标签时优先避开这类页面
     detail_url_marker: str = ""
+    # 会话节奏器(防风控):翻页每 2~4 页、详情每 8~15 个,插入一次 15~40 秒长休息
+    # (模拟真人离开/阅读)。每平台一个适配器实例且每平台仅一个并发任务,类级共享安全。
+    _page_pacer: SessionPacer = SessionPacer(label="翻页")
+    _detail_pacer: SessionPacer = SessionPacer(batch=(8, 15), label="详情页")
 
     @abstractmethod
     async def is_logged_in(self, page: Page) -> bool:

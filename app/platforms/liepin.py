@@ -29,6 +29,7 @@ from ..utils import (
     active_estimate_from_text,
     detail_delay,
     fmt_dt,
+    global_nav_gate,
     human_delay,
     human_scroll,
     page_responsive,
@@ -36,6 +37,7 @@ from ..utils import (
     patient_poll,
     save_snapshot,
     silent_backoff,
+    warmup,
 )
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
@@ -308,6 +310,11 @@ class LiepinPlatform(BasePlatform):
         """详情页:JSON-LD(schema.org JobPosting)优先,DOM 兜底;落地校验+风控/blank 检测。"""
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
+        # 批次长休息:每 8~15 个详情页插入一次 15~40 秒会话休息——猎聘每岗必开
+        # 详情,单页 40 条连续导航是短时触发人机验证的主因,批次休息是关键防线
+        await self._detail_pacer.tick(self.id, progress=progress, should_stop=should_stop)
+        # 全局导航闸:多平台并发时控制叠加请求率
+        await global_nav_gate()
         if should_stop is not None and should_stop():
             return
         try:
@@ -408,6 +415,8 @@ class LiepinPlatform(BasePlatform):
         sal_rng = (extras or {}).get("salary") or ""
         try:
             seen: set[str] = set()
+            # 启动预热:载体页静默停留 + 轻滚动,避免任务启动瞬间即高频发请求
+            await warmup(page, self.id)
             for page_num in range(1, max(1, max_pages) + 1):
                 if should_stop is not None and should_stop():
                     return
@@ -425,6 +434,8 @@ class LiepinPlatform(BasePlatform):
                             timeout=20000,
                         ) as ri:
                             try:
+                                # 全局导航闸:多平台并发时控制叠加请求率(同 IP 总频率)
+                                await global_nav_gate()
                                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                             except PWTimeout:
                                 pass
@@ -492,6 +503,8 @@ class LiepinPlatform(BasePlatform):
                 if page_num < max_pages:
                     await human_scroll(page)
                     await human_delay(self.id)
+                    # 批次长休息:每 2~4 页插入一次 15~40 秒会话休息(防风控)
+                    await self._page_pacer.tick(self.id, progress=progress, should_stop=should_stop)
         finally:
             if own_detail and dp is not None:
                 try:

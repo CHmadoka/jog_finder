@@ -76,9 +76,90 @@ RETRY_UNIT = 5.0
 RETRY_ATTEMPTS = 3
 
 
-async def silent_backoff(unit: float = RETRY_UNIT) -> None:
-    """静默退避等待:unit 秒观察 + rand(0, unit) 秒随机静默(全程不做任何导航/刷新)。"""
-    await asyncio.sleep(unit + random.uniform(0, unit))
+async def silent_backoff(unit: float = RETRY_UNIT, should_stop=None) -> None:
+    """静默退避等待:unit 秒观察 + rand(0, unit) 秒随机静默(全程不做任何导航/刷新)。
+
+    should_stop: 可选停止检查,等待期间每秒检查一次,及时响应停止指令。
+    """
+    await interruptible_sleep(unit + random.uniform(0, unit), should_stop)
+
+
+async def interruptible_sleep(seconds: float, should_stop=None) -> None:
+    """可中断分段睡眠:每约 1 秒检查一次停止标志,长等待也能及时响应停止指令。"""
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + seconds
+    while True:
+        remain = deadline - loop.time()
+        if remain <= 0:
+            return
+        if should_stop is not None and should_stop():
+            return
+        await asyncio.sleep(min(1.0, remain))
+
+
+# ---------- 跨平台全局导航闸 ----------
+# 三个平台共用同一浏览器(同一出口 IP):各平台自身已有 3~8s 随机间隔,但多平台
+# 并发抓取时叠加请求率仍可能过高。全局闸保证任意两次"主动请求"(goto/接口
+# fetch)之间至少间隔 1.5~3 秒(随机),与各平台自身间隔相乘生效。
+_NAV_GATE_LOCK: asyncio.Lock | None = None
+_NAV_GATE_LAST = 0.0
+_NAV_GATE_GAP = (1.5, 3.0)
+
+
+def _nav_gate_lock() -> asyncio.Lock:
+    global _NAV_GATE_LOCK
+    if _NAV_GATE_LOCK is None:      # 惰性创建:绑定到当前事件循环
+        _NAV_GATE_LOCK = asyncio.Lock()
+    return _NAV_GATE_LOCK
+
+
+async def global_nav_gate() -> None:
+    """跨平台导航/请求全局闸:发起 goto/接口 fetch 前调用。"""
+    global _NAV_GATE_LAST
+    async with _nav_gate_lock():
+        loop = asyncio.get_event_loop()
+        gap = random.uniform(*_NAV_GATE_GAP)
+        wait = _NAV_GATE_LAST + gap - loop.time()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _NAV_GATE_LAST = loop.time()
+
+
+class SessionPacer:
+    """会话节奏器:在常规随机间隔之外,每处理一批(页/岗位)插入一次长休息。
+
+    恒定短节奏(即使带随机)持续数十次仍会被平台统计识别——真人会中途离开/
+    阅读。批次大小与休息时长均随机;批次未耗尽时 tick 直接返回不休息。
+    计数跨任务累计(每次任务开始不重置):只会更保守,无副作用。
+    """
+
+    def __init__(self, *, batch: tuple[int, int] = (2, 4), idle: tuple[float, float] = (15, 40),
+                 label: str = "翻页") -> None:
+        self.batch = batch
+        self.idle = idle
+        self.label = label
+        self._left = random.randint(*batch)
+
+    async def tick(self, platform: str, progress=None, should_stop=None) -> None:
+        """每完成一页/一个岗位调用一次;批次耗尽时插入一次长休息(可被停止打断)。"""
+        self._left -= 1
+        if self._left > 0:
+            return
+        self._left = random.randint(*self.batch)
+        wait = random.uniform(*self.idle)
+        if progress:
+            progress(f"防风控会话休息 {wait:.0f} 秒({self.label}批次完成,模拟真人离开后返回)")
+        await interruptible_sleep(wait, should_stop)
+
+
+async def warmup(page, platform: str) -> None:
+    """任务启动预热:载体页静默停留 + 轻滚动,模拟真人进入后先浏览再操作,
+    避免任务启动瞬间即高频发请求(猎聘/前程无忧短时触发验证的常见诱因)。"""
+    await human_delay(platform)
+    try:
+        await human_scroll(page, 2)
+    except Exception:  # noqa: BLE001  (载体页异常不阻断任务)
+        pass
 
 
 async def patient_poll(
@@ -92,7 +173,7 @@ async def patient_poll(
     for _ in range(rounds):
         if should_stop is not None and should_stop():
             return False
-        await silent_backoff(unit)
+        await silent_backoff(unit, should_stop)
         if await check():
             return True
     return False

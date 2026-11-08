@@ -83,10 +83,9 @@
        指示灯是徽标的兄弟节点,不随透明度变暗,运行/异常灯保持醒目 */
     .top-plat .plogo { opacity: .5; transition: opacity .15s; }
     .top-plat:hover .plogo, .top-plat.active .plogo { opacity: 1; }
-    /* 最近任务结果临时状态:完成→绿环,异常→红环(运行中指示灯绿点优先覆盖);
-       纯图标按钮上用外圈阴影环(原 inset 描边会被整幅徽标图片盖住) */
+    /* 最近任务结果临时状态:完成→绿环;异常→不加红环(视觉降噪),
+       风控/失败状态由信号灯(徽标角标与状态区圆点)变红表达 */
     .top-plat.st-done { box-shadow: 0 0 0 1.5px #22c55e; }
-    .top-plat.st-error { box-shadow: 0 0 0 1.5px #dc2626; }
 
     /* ---------- 顶部中心状态区(常驻,absolute 居中,不参与顶栏 flex 布局) ---------- */
     /* 白色圆角框承载(与左侧品牌区同款),内部不受顶栏品牌主题色影响;
@@ -305,6 +304,7 @@
     .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .dot.on { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); animation: blink 1.2s infinite; }
     .dot.off { background: #cbd2dc; }
+    .dot.err { background: #dc2626; box-shadow: 0 0 6px rgba(220,38,38,.55); }
     @keyframes blink { 50% { opacity: .4; } }
     .combo-line { display: flex; gap: 6px; align-items: center; padding: 1px 0; color: var(--text2); }
     .combo-line .c-idx { color: var(--text3); flex-shrink: 0; min-width: 36px; font-variant-numeric: tabular-nums; }
@@ -550,8 +550,7 @@
       <div class="top-plats">
         <div v-for="p in platforms" :key="p.id" class="top-plat" :title="p.name"
              :class="{ active: grab.platform === p.id,
-                       'st-done': taskStatusOf(p.id) === 'done',
-                       'st-error': taskStatusOf(p.id) === 'error' }" @click="switchPlatform(p.id)">
+                       'st-done': taskStatusOf(p.id) === 'done' }" @click="switchPlatform(p.id)">
           <span class="badge" :class="isRunning(p.id) ? 'on' : (taskStatusOf(p.id) === 'error' ? 'err' : 'off')"></span>
           <span class="plogo" :style="platformLogo(p.id).img ? {} : { background: platformLogo(p.id).bg }">
             <img v-if="platformLogo(p.id).img" :src="platformLogo(p.id).img2x || platformLogo(p.id).img"
@@ -592,7 +591,7 @@
     <div class="top-status">
       <div class="ts-item" v-for="seg in statusSegments" :key="seg.pid"
            @mouseenter="comboHover = seg.pid" @mouseleave="comboHover = null">
-        <span class="dot" :class="seg.status.running ? 'on' : 'off'"></span>
+        <span class="dot" :class="seg.status.running ? 'on' : ((seg.status.last && seg.status.last.status === 'error') ? 'err' : 'off')"></span>
         <span class="ts-name">{{ platformOf(seg.pid) }}</span>
         <span class="ts-idle" v-if="!seg.status.running">空闲</span>
         <template v-if="seg.status.running">

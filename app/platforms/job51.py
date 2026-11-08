@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import time as _time
 from typing import AsyncIterator
@@ -26,13 +27,15 @@ from playwright.async_api import Page, TimeoutError as PWTimeout
 from ..utils import (
     RETRY_ATTEMPTS,
     detail_delay,
+    global_nav_gate,
     human_delay,
-    human_scroll,
+    interruptible_sleep,
     page_responsive,
     parse_relative_time,
     patient_poll,
     save_snapshot,
     silent_backoff,
+    warmup,
 )
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
@@ -153,6 +156,8 @@ class Job51Platform(BasePlatform):
         """
         for i in range(2):
             try:
+                # 全局导航闸:多平台并发时控制叠加请求率(同 IP 总频率)
+                await global_nav_gate()
                 raw = await page.evaluate(self._fetch_js(self._api_qs(keyword, area, page_num)))
                 if raw and raw.strip().startswith("{"):
                     return json.loads(raw)
@@ -239,8 +244,14 @@ class Job51Platform(BasePlatform):
                 await asyncio.sleep(5)
                 try:
                     if not await self._is_verify_page(page):
+                        # 验证通过后先冷却再继续:刚通过验证的会话被平台重点观察,
+                        # 立即恢复高频抓取极易二次触发
+                        cooldown = random.uniform(20, 40)
                         if progress:
-                            progress("人工验证已通过,继续抓取")
+                            progress(f"人工验证已通过,冷却 {cooldown:.0f} 秒后继续抓取")
+                        await interruptible_sleep(cooldown, should_stop)
+                        if progress:
+                            progress("冷却完成,继续抓取")
                         return
                 except Exception:  # noqa: BLE001  (渲染中的瞬态异常:继续静默观察)
                     pass
@@ -329,6 +340,10 @@ class Job51Platform(BasePlatform):
         """打开详情页兜底解析描述(JSON-LD + DOM);落地校验 + 风控/blank 检测。"""
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
+        # 批次长休息:每 8~15 个详情页插入一次 15~40 秒会话休息(防风控)
+        await self._detail_pacer.tick(self.id, progress=progress, should_stop=should_stop)
+        # 全局导航闸:多平台并发时控制叠加请求率
+        await global_nav_gate()
         if should_stop is not None and should_stop():
             return
         try:
@@ -461,6 +476,8 @@ class Job51Platform(BasePlatform):
             if "passport.51job.com" in (page.url or "") or re.search(r"/login", (page.url or "")):
                 raise LoginRequired("51job 搜索页跳转到登录页")
             await self._wait_if_verify(page, progress=progress, should_stop=should_stop)
+            # 启动预热:静默停留 + 轻滚动,避免任务启动瞬间即高频发请求
+            await warmup(page, self.id)
 
             seen: set[str] = set()
             total: int | None = None
@@ -573,6 +590,8 @@ class Job51Platform(BasePlatform):
                     break
                 if page_num < max_pages:
                     await human_delay(self.id)
+                    # 批次长休息:每 2~4 页插入一次 15~40 秒会话休息(防风控)
+                    await self._page_pacer.tick(self.id, progress=progress, should_stop=should_stop)
         finally:
             if own_detail and dp is not None:
                 try:
