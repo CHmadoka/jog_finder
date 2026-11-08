@@ -551,6 +551,20 @@ const app = createApp({
       query.page = 1;
       loadJobs();
       loadStats();
+      scrollTopOfJobs();
+    }
+    // 岗位表格置顶:翻页/换数据集(切表/筛选/搜索/每页条数)后从头部看起;
+    // 目标是 el-table 内部的滚动容器(.el-scrollbar__wrap),外层卡片可滚时兜底。
+    // 轮询等后台刷新直接调 loadJobs,不置顶——避免打断正在阅读的位置
+    function scrollTopOfJobs() {
+      const wrap = document.querySelector(".table-card .el-scrollbar__wrap");
+      if (wrap) wrap.scrollTop = 0;
+      const card = document.querySelector(".table-card");
+      if (card && card.scrollHeight > card.clientHeight) card.scrollTop = 0;
+    }
+    function onPageTurn() {
+      loadJobs();
+      scrollTopOfJobs();
     }
     function setFit(v) {
       query.fit = query.fit === v ? "" : v;
@@ -1037,7 +1051,7 @@ const app = createApp({
       comboHover,
       gearForm, filterForm, tableForm,
       currentStatus, running, stopping, isStopping, canStart, startHint, delayRisk, normalizeDelay, resetDelay,
-      sortState, skipTipOf, currentTableName, brandBg,
+      sortState, skipTipOf, currentTableName, brandBg, onPageTurn,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       kwCount, cityLabel, statusSegments,
       platformLogo, onLogoError,

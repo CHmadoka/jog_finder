@@ -904,7 +904,7 @@
         <div class="pager">
           <el-pagination layout="total, sizes, prev, pager, next" :total="jobs.total"
                          :page-sizes="[20, 50, 100]" v-model:current-page="query.page"
-                         v-model:page-size="query.page_size" @current-change="loadJobs"
+                         v-model:page-size="query.page_size" @current-change="onPageTurn"
                          @size-change="reloadJobs" background size="small"></el-pagination>
         </div>
       </div>
