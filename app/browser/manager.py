@@ -42,9 +42,24 @@ ANTIDEBUG_NEUTRALIZE_JS = """
     for (let i = 0; i < names.length; i++) {
       try { console[names[i]] = noop; } catch (e) {}
     }
+    // 生效标记(不可枚举,不进入 Object.keys/for-in,避免成为新的特征):
+    // 重连时据此判断该文档是否已受补丁保护,已保护的页面不再 reload
+    Object.defineProperty(window, '__jfArm', { value: 1, configurable: true });
   } catch (e) {}
 })();
 """
+
+# 需要反调试免疫的站点:只有这些域名下的页面才允许为"装补丁"而 reload。
+# 其它标签(用户自己在看的页面)一律不动——连接 CDP 不该顺手刷新用户的浏览器。
+_ARM_SITES = ("zhipin.com", "51job.com", "liepin.com")
+
+_ARMED_JS = "() => { try { return window.__jfArm === 1; } catch (e) { return false; } }"
+
+
+def _needs_arm(url: str) -> bool:
+    """该页面是否属于需要反调试免疫的招聘站点(about:/chrome: 等一律不算)。"""
+    u = url or ""
+    return any(site in u for site in _ARM_SITES)
 
 # 常见浏览器安装位置(Windows)
 _BROWSER_CANDIDATES = [
@@ -284,13 +299,15 @@ class BrowserManager:
     async def _arm_antidebug(ctx: BrowserContext) -> None:
         """对 context 施加反自动化免疫。
 
-        add_init_script 只对未来加载的文档生效,因此对"已加载页面"执行一次
-        reload,使其在文档创建前获得补丁。不要对已加载页面事后 evaluate 注入——
-        运行中的反调试脚本会检测到 console 方法被改写,反而加速判定命中。
+        add_init_script 只对未来加载的文档生效,因此对"已加载页面"需要一次 reload,
+        使其在文档创建前获得补丁。不要对已加载页面事后 evaluate 注入——运行中的
+        反调试脚本会检测到 console 方法被改写,反而加速判定命中。
 
-        reload 是必须的:已加载页面(如首屏)没有补丁时,反调试脚本随时可能命中
-        并 window.close() 偷关标签页(命令行打开的窗口可被脚本关闭),若它是
-        唯一标签,整个浏览器随之退出——表现为"页面/浏览器无故消失"。
+        只对**招聘站点**页面做 reload,且文档已带补丁标记(__jfArm)时跳过:
+        每次脚本/服务连接 CDP 都刷新全部标签会反复请求平台(实测把 51job/猎聘
+        页面反复刷了多轮),既浪费请求额度也是真实的额外访问暴露。
+        未受补丁保护的页面仍必须 reload:裸奔文档随时可能被反调试脚本 window.close()
+        偷关标签,若它是唯一标签,整个浏览器随之退出——表现为"页面/浏览器无故消失"。
         """
         try:
             await ctx.add_init_script(ANTIDEBUG_NEUTRALIZE_JS)
@@ -298,6 +315,13 @@ class BrowserManager:
             logger.debug("add_init_script 失败", exc_info=True)
         for pg in list(ctx.pages):
             pg.on("close", BrowserManager._make_reopen_handler(pg))
+            if not _needs_arm(pg.url):
+                continue
+            try:
+                if await pg.evaluate(_ARMED_JS):
+                    continue        # 已受保护:无需再刷一次
+            except Exception:  # noqa: BLE001  (导航中/崩溃页:按未受保护处理)
+                pass
             try:
                 await pg.reload(wait_until="domcontentloaded", timeout=15000)
             except Exception:  # noqa: BLE001
@@ -382,6 +406,39 @@ class BrowserManager:
         page = await ctx.new_page()
         await page.goto(url or url_prefix, wait_until="domcontentloaded")
         return page
+
+    async def navigate_native(
+        self, page: Page, url: str, *, referrer: str | None = None,
+        timeout: float = 25000,
+    ) -> None:
+        """用 CDP 会话完成导航(替代 page.goto),供"反调试站点"页面使用。
+
+        为什么需要: Boss 详情页的反调试脚本能识别 Playwright 的 page.goto()
+        ——命中后自杀式清空文档,表现为落地即 about:blank、标题为空(实测:
+        同一 URL 同一标签,page.goto 停在 about:blank,CDP Page.navigate 正常
+        落地且 DOM 完整;落地后用 Playwright evaluate 读 DOM 完全不受影响)。
+
+        导航结果不做断言:落地校验仍由调用方的 URL/DOM 轮询判定(与 goto 一致)。
+        """
+        try:
+            cdp = await page.context.new_cdp_session(page)
+        except Exception:  # noqa: BLE001
+            # 拿不到 CDP 会话(极旧 target):退回 Playwright 导航,保证功能不丢
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout,
+                            referrer=referrer)
+            return
+        try:
+            params: dict = {"url": url}
+            if referrer:
+                # 带站内来路:更像真人从列表点击进入(100% 直达是强自动化签名)
+                params["referrer"] = referrer
+                params["transitionType"] = "link"
+            await cdp.send("Page.navigate", params)
+        finally:
+            try:
+                await cdp.detach()
+            except Exception:  # noqa: BLE001
+                pass
 
     @staticmethod
     def _looks_like_verify(url: str, title: str) -> bool:

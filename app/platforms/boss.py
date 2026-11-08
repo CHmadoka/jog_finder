@@ -407,7 +407,7 @@ class BossPlatform(BasePlatform):
                 "securityId": x.get("securityId") or "",
                 "lid": x.get("lid") or "",
                 "labels": labels,
-                "_warnings": warns,
+                **({"_warnings": warns} if warns else {}),
             },
         ), warns
 
@@ -443,8 +443,12 @@ class BossPlatform(BasePlatform):
         # 真人打开详情来自列表页点击:带上"列表来路" referer(100% 直达入口是强自动化签名)
         referrer = (self._search_ctx or {}).get("referer") or self.home_url
         t0 = time.monotonic()
+        # 用 CDP 会话导航而非 page.goto:Boss 详情页反调试脚本能识别 Playwright
+        # 的 goto(实测命中后自杀式清空文档,落地即 about:blank/标题为空),CDP
+        # Page.navigate 打开同一 URL 可正常落地且不影响后续 Playwright 读 DOM。
+        from ..browser import browser_manager
         try:
-            await page.goto(u, wait_until="domcontentloaded", timeout=25000, referrer=referrer)
+            await browser_manager.navigate_native(page, u, referrer=referrer)
         except Exception:  # noqa: BLE001  (超时/导航中断均由后置 URL 轮询兜底)
             pass
         # 访问受限第一时间判定:立即中止整个任务。绝不能当"岗位已下线"继续

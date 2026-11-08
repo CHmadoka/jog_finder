@@ -363,7 +363,12 @@ def save_raw(platform: str, kind: str, body, meta: dict | None = None) -> Path |
             "body": body,
         }
         path = d / name
-        path.write_text(json.dumps(envelope, ensure_ascii=False, default=str), encoding="utf-8")
+        # indent=2:留存文件以人工阅读排查为唯一用途,可读性优先于体积
+        # (紧凑单行是机器传输惯例,排查时根本没法看);7 天滚动清理下体积可接受
+        path.write_text(
+            json.dumps(envelope, ensure_ascii=False, default=str, indent=2),
+            encoding="utf-8",
+        )
         _cleanup_raw(d)
         return path
     except Exception as exc:  # noqa: BLE001  (留存失败不影响抓取)
