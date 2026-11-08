@@ -124,11 +124,6 @@
     }
     .tsc.save { background: #e7f7ee; color: #16803c; }
     .tsc.skip { background: #fdf3e3; color: #b45309; }
-    /* 非当前平台的运行段(简报态):无计数徽章/组合浮层,进度更窄;点击切换到该平台 */
-    .ts-item.ts-mini { cursor: pointer; }
-    .ts-item.ts-mini .ts-name { color: var(--text2); }
-    .ts-item.ts-mini .ts-progress { max-width: 130px; }
-    .ts-item.ts-mini:hover .ts-name { color: var(--el-color-primary); }
     /* 组合进度浮层:悬停平台段向下展开(词条×城市全部组合) */
     .combo-pop {
       position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
@@ -594,15 +589,10 @@
          当前平台恒在首位(空闲=灰点+「空闲」;运行=绿点+进度+计数徽章),
          其后为其它运行中平台(多平台并发同屏);悬停运行中的平台段向下浮层展开任务组合 -->
     <div class="top-status">
-      <!-- 状态区信息分层:当前平台=完整详情(进度+计数徽章+组合悬停);
-           其它运行中平台=一行简报(dot+名+窄进度,无徽章/浮层),点击即切换过去
-           ——切换平台时状态区结构恒定,不再多段全量信息并排杂糅 -->
+      <!-- 状态区只显示当前选中平台(其它平台的运行状态由平台按钮信号灯表达):
+           圆点 + 平台名 + 进度 + 计数徽章,悬停展开词条×城市组合 -->
       <div class="ts-item" v-for="seg in statusSegments" :key="seg.pid"
-           :class="{ 'ts-mini': seg.pid !== grab.platform }"
-           :title="seg.pid !== grab.platform ? '点击切换到 ' + platformOf(seg.pid) : undefined"
-           @click="seg.pid !== grab.platform && switchPlatform(seg.pid)"
-           @mouseenter="seg.pid === grab.platform && (comboHover = seg.pid)"
-           @mouseleave="comboHover = null">
+           @mouseenter="comboHover = seg.pid" @mouseleave="comboHover = null">
         <span class="dot" :class="seg.status.running ? 'on' : ((seg.status.last && seg.status.last.status === 'error') ? 'err' : 'off')"></span>
         <span class="ts-name">{{ platformOf(seg.pid) }}</span>
         <span class="ts-idle" v-if="!seg.status.running">空闲</span>
@@ -610,13 +600,13 @@
           <span class="ts-progress" :title="seg.status.progress">
             <template v-if="seg.status.stopping">⏹ 停止中·</template>{{ seg.status.progress || '正在准备…' }}
           </span>
-          <span class="ts-counters" v-if="seg.pid === grab.platform && seg.status.counters">
+          <span class="ts-counters" v-if="seg.status.counters">
             <span class="tsc">发现 {{ seg.status.counters.found || 0 }}</span>
             <span class="tsc save">入库 {{ seg.status.counters.saved || 0 }}</span>
             <span class="tsc skip" :title="skipTipOf(seg.pid)">跳过 {{ seg.status.counters.skipped || 0 }}</span>
           </span>
         </template>
-        <div class="combo-pop" v-if="seg.pid === grab.platform && seg.status.running && seg.status.combos && comboHover === seg.pid">
+        <div class="combo-pop" v-if="seg.status.running && seg.status.combos && comboHover === seg.pid">
           <div class="combo-line" v-for="(c, i) in seg.status.combos.items" :key="i"
                :class="{ 'is-running': c.state === 'running', 'is-done': c.state === 'done' }">
             <span class="c-idx">{{ i + 1 }}/{{ seg.status.combos.total }}</span>
