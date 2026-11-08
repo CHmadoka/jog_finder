@@ -225,11 +225,11 @@ const app = createApp({
     // 任务组合进度:状态卡平台段悬停展开(浮层),comboHover 记录展开的平台 id
     const comboHover = ref(null);
     // 状态卡段列表(常驻显示):当前平台恒在首位(运行中带计数/进度,空闲显示空闲态),
-    // 其后追加其它运行中平台(多平台并发同屏);过滤 pollStatus 的 *_was 辅助键
+    // 其后追加其它运行中平台(多平台并发同屏);过滤 pollStatus 的 *_was/*_vw 辅助键
     const statusSegments = computed(() => {
       const segs = [{ pid: grab.platform, status: statuses[grab.platform] || {} }];
       for (const [pid, s] of Object.entries(statuses)) {
-        if (pid.endsWith("_was") || pid === grab.platform) continue;
+        if (pid.endsWith("_was") || pid.endsWith("_vw") || pid === grab.platform) continue;
         if (s && s.running) segs.push({ pid, status: s });
       }
       return segs;
