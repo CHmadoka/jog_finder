@@ -12,10 +12,46 @@ from .config import config
 
 logger = logging.getLogger(__name__)
 
+# ---------- 运行时延迟覆盖 ----------
+# 各平台任务可携带自定义随机间隔范围(前端「随机间隔」设置框,默认 3~8 秒防风控)。
+# key = 平台 id;调度器保证每平台同时仅一个任务,覆盖互不干扰,任务结束即清除。
+_RUNTIME_DELAYS: dict[str, tuple[float, float]] = {}
 
-async def human_delay() -> None:
-    """页面动作间的随机延迟,模拟人工节奏。"""
-    lo, hi = config.DELAY_MIN, config.DELAY_MAX
+
+def normalize_delay(lo, hi) -> tuple[float, float]:
+    """规整延迟范围(秒):非法值回退 config 默认,保证 hi >= lo > 0。"""
+    try:
+        lo, hi = float(lo), float(hi)
+    except (TypeError, ValueError):
+        return config.DELAY_MIN, config.DELAY_MAX
+    if lo <= 0 or hi <= 0:
+        return config.DELAY_MIN, config.DELAY_MAX
+    if lo > hi:
+        lo, hi = hi, lo
+    return lo, hi
+
+
+def set_runtime_delay(platform: str, lo, hi) -> tuple[float, float]:
+    """注册某平台本次任务的随机间隔范围,返回规整后的实际生效值。"""
+    pair = normalize_delay(lo, hi)
+    _RUNTIME_DELAYS[platform] = pair
+    return pair
+
+
+def clear_runtime_delay(platform: str) -> None:
+    """任务结束时清除该平台的运行时延迟覆盖(回退 config 默认)。"""
+    _RUNTIME_DELAYS.pop(platform, None)
+
+
+async def human_delay(platform: str | None = None) -> None:
+    """页面动作间的随机延迟,模拟人工节奏(任务级覆盖 > config 默认)。"""
+    lo, hi = _RUNTIME_DELAYS.get(platform) or (config.DELAY_MIN, config.DELAY_MAX)
+    await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+
+
+async def detail_delay(platform: str | None = None) -> None:
+    """详情页访问间的随机延迟,模拟人工浏览(任务级覆盖 > config 默认)。"""
+    lo, hi = _RUNTIME_DELAYS.get(platform) or (config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX)
     await asyncio.sleep(random.uniform(lo, max(lo, hi)))
 
 

@@ -397,6 +397,8 @@ class Scheduler:
         salary: str | None = None,
         table_id: int | None = None,
         max_pages: int | None = None,
+        delay_min: float | None = None,
+        delay_max: float | None = None,
     ) -> int:
         """启动抓取任务。
 
@@ -404,6 +406,8 @@ class Scheduler:
         cities: 城市列表(多选,空=全国);city 为旧单值参数(兼容),cities 优先。
         salary: 薪资范围原文(如 "10-20" / "10," / ",20",单位K/月,单边可缺省)。
         table_id: 新岗位存入的目标数据表(空=默认表)。
+        delay_min/delay_max: 本次任务所有页面动作(翻页/详情)的随机间隔范围(秒),
+        防风控;缺省回退 config 默认(3~8)。
         """
         if self.is_running(platform):
             raise AlreadyRunning(f"平台 {platform} 已有任务在运行(每平台仅允许一个)")
@@ -446,10 +450,17 @@ class Scheduler:
                 raise ValueError(f"数据表不存在: {table_id}")
 
         max_pages = max_pages or config.MAX_PAGES_PER_TASK
+        # 随机间隔范围(秒):规整后存快照,任务运行期统一应用到翻页与详情页延迟
+        from ..utils import normalize_delay
+        delay_lo, delay_hi = normalize_delay(
+            delay_min if delay_min is not None else config.DELAY_MIN,
+            delay_max if delay_max is not None else config.DELAY_MAX,
+        )
         snapshot = {
             "city": ",".join(cities), "cities": cities, "keyword": "、".join(kw_list), "gear": gear_name,
             "keywords": kw_list, "extras": extras, "max_pages": max_pages,
             "salary": sal_raw, "table_id": table_id,
+            "delay_min": delay_lo, "delay_max": delay_hi,
         }
 
         task_id = await asyncio.to_thread(_db_create_task, platform, snapshot, table_id)
@@ -615,6 +626,16 @@ class Scheduler:
             self._progress[platform] = f"[任务{task_id}] {msg}"
             logger.info("%s", self._progress[platform])
 
+        # 运行时延迟覆盖:本次任务所有页面动作(翻页/详情)统一使用任务级随机间隔(秒),
+        # 任务级未携带(旧快照/脚本直调)时回退 config 默认(3~8)。任务结束在 finally 清除。
+        from ..utils import clear_runtime_delay, set_runtime_delay
+        delay_lo, delay_hi = set_runtime_delay(
+            platform,
+            snap.get("delay_min") if snap.get("delay_min") is not None else config.DELAY_MIN,
+            snap.get("delay_max") if snap.get("delay_max") is not None else config.DELAY_MAX,
+        )
+        progress(f"防风控随机间隔:{delay_lo:g}~{delay_hi:g} 秒")
+
         status, message = "done", ""
         skip_stats: dict[str, int] = {}
 
@@ -704,7 +725,7 @@ class Scheduler:
                 if idx < total and not stop.is_set():
                     from ..utils import human_delay
 
-                    await human_delay()
+                    await human_delay(platform)
                 if not stop.is_set():
                     combo_items[idx - 1]["state"] = "done"
             if not stop.is_set() and status == "done":
@@ -751,6 +772,7 @@ class Scheduler:
             self._tasks.pop(platform, None)
             self._stops.pop(platform, None)
             self._combos.pop(platform, None)
+            clear_runtime_delay(platform)   # 任务结束:延迟覆盖回退 config 默认
             if self._running_task_ids.get(platform) == task_id:
                 self._running_task_ids.pop(platform, None)
             logger.info("任务 %d 结束: %s - %s", task_id, status, message)

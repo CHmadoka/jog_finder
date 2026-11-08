@@ -135,6 +135,8 @@ const app = createApp({
       salary_max: "",           // 薪资范围上限(K/月,可缺省)
       max_pages: 10,
       table_id: 1,              // 抓取结果存入的数据表
+      delay_min: 3,             // 随机间隔下限(秒):所有平台页面动作(翻页/详情)统一生效
+      delay_max: 8,             // 随机间隔上限(秒),必须 >= delay_min(normalizeDelay 兜底)
     });
 
     // 右栏:岗位浏览筛选(默认按最后更新时间倒序)
@@ -177,6 +179,23 @@ const app = createApp({
       if (grab.mode === "saved") return "请先选择一个已存条件";
       return "请先选择岗位设置";
     });
+    // 风控建议:随机间隔任一端低于 2 秒 → 红字提示(仅警告不拦截,由用户自行权衡)
+    const delayRisk = computed(() => {
+      const lo = grab.delay_min, hi = grab.delay_max;
+      return (lo != null && lo < 2) || (hi != null && hi < 2);
+    });
+    // 随机间隔规整:空值回默认,并保证右值(上限)始终 >= 左值(下限)
+    function normalizeDelay() {
+      if (grab.delay_min == null) grab.delay_min = 3;
+      if (grab.delay_max == null) grab.delay_max = 8;
+      if (grab.delay_max < grab.delay_min) grab.delay_max = grab.delay_min;
+    }
+    // 复位:恢复防风控默认间隔 3~8 秒
+    function resetDelay() {
+      grab.delay_min = 3;
+      grab.delay_max = 8;
+      ElMessage.success("已恢复默认随机间隔 3~8 秒");
+    }
     // 表头排序指示器的受控状态(与 query.sort_by/sort_order 同步)
     const SORT_PROP = { updated: "updated_at", published: "published_at", hr_active: "hr_active_at", city: "city", exp_edu: "experience" };
     const sortState = computed(() => [
@@ -646,6 +665,8 @@ const app = createApp({
           salary,
           table_id: grab.table_id || 1,   // 存入目标表(左栏选择,与右栏浏览无关)
           max_pages: grab.max_pages,
+          delay_min: grab.delay_min,      // 随机间隔范围(秒):防风控,所有平台统一生效
+          delay_max: grab.delay_max,
         };
         const body = grab.mode === "saved"
           ? { ...base, filter_id: grab.filter_id }
@@ -999,7 +1020,7 @@ const app = createApp({
       jobKeywords, hitKeywords, highlightedDesc, highlightedTitle,
       comboHover,
       gearForm, filterForm, tableForm,
-      currentStatus, running, canStart, startHint,
+      currentStatus, running, canStart, startHint, delayRisk, normalizeDelay, resetDelay,
       sortState, skipTipOf, currentTableName, brandBg,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       kwCount, cityLabel, statusSegments,

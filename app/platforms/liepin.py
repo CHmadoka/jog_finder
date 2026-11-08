@@ -7,7 +7,7 @@
   含公司行业/规模/融资阶段/HR活跃文案/刷新时间);DOM 卡片解析兜底
 - 列表不带职位描述:逐岗打开详情页,JSON-LD(schema.org JobPosting)优先,
   DOM(.job-intro-container)兜底
-- 节奏:详情页随机 2~8s 间隔(config.DETAIL_DELAY_*),翻页间 human_delay
+- 节奏:详情页随机间隔(任务级设置,默认 3~8s),翻页间 human_delay
 - 风控:验证页特征即时判定(AntiBot 中止);登录页跳转立即中止
 - 活跃度:recruiter.imShowText("1天前在线")→ 统一估算规则;缺失退回 refreshTime
 - 平台行为:猎聘搜索结果会混入外地"推荐"岗位,dq 字段如实记录城市,不做过滤
@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import re
 from datetime import datetime
 from typing import AsyncIterator
@@ -25,9 +24,9 @@ from urllib.parse import quote
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
-from ..config import config
 from ..utils import (
     active_estimate_from_text,
+    detail_delay,
     fmt_dt,
     human_delay,
     human_scroll,
@@ -303,9 +302,8 @@ class LiepinPlatform(BasePlatform):
     # ---------- 详情解析 ----------
     async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
         """详情页:JSON-LD(schema.org JobPosting)优先,DOM 兜底;落地校验+风控/blank 检测。"""
-        # 详情页节奏:随机 2~8 秒/个(config.DETAIL_DELAY_*),模拟人工浏览
-        lo, hi = config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX
-        await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+        # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
+        await detail_delay(self.id)
         if should_stop is not None and should_stop():
             return
         try:
@@ -472,7 +470,7 @@ class LiepinPlatform(BasePlatform):
                     break
                 if page_num < max_pages:
                     await human_scroll(page)
-                    await human_delay()
+                    await human_delay(self.id)
         finally:
             if own_detail and dp is not None:
                 try:

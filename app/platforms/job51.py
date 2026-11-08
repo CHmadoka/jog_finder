@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import re
 import time as _time
 from typing import AsyncIterator
@@ -24,8 +23,13 @@ from urllib.parse import quote, urlencode
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
-from ..config import config
-from ..utils import human_delay, human_scroll, parse_relative_time, save_snapshot
+from ..utils import (
+    detail_delay,
+    human_delay,
+    human_scroll,
+    parse_relative_time,
+    save_snapshot,
+)
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
 from .common import parse_salary_range, parse_salary_months, salary_in_range, strip_html
@@ -294,9 +298,8 @@ class Job51Platform(BasePlatform):
     # ---------- 详情兜底(仅描述缺失时) ----------
     async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
         """打开详情页兜底解析描述(JSON-LD + DOM);落地校验 + 风控/blank 检测。"""
-        # 详情页节奏:随机 2~8 秒/个(config.DETAIL_DELAY_*),模拟人工浏览
-        lo, hi = config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX
-        await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+        # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
+        await detail_delay(self.id)
         if should_stop is not None and should_stop():
             return
         try:
@@ -456,7 +459,7 @@ class Job51Platform(BasePlatform):
                             f"前程无忧接口连续失败({msg}),任务已暂停。"
                             "可能被限流或需要安全验证:请在浏览器中人工检查后重新开始任务"
                         )
-                    await human_delay()
+                    await human_delay(self.id)
                     page_num -= 1  # 重试当前页
                     continue
                 fail_streak = 0
@@ -473,7 +476,7 @@ class Job51Platform(BasePlatform):
                         retried_empty = True
                         if progress:
                             progress(f"第 {page_num} 页异常为空(接口 total={total}),等待后重试")
-                        await human_delay()
+                        await human_delay(self.id)
                         page_num -= 1  # 重试当前页
                         continue
                     if progress:
@@ -538,7 +541,7 @@ class Job51Platform(BasePlatform):
                         progress(f"已覆盖全部 {total} 条结果,提前结束翻页")
                     break
                 if page_num < max_pages:
-                    await human_delay()
+                    await human_delay(self.id)
         finally:
             if own_detail and dp is not None:
                 try:

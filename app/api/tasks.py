@@ -29,8 +29,10 @@ def list_platforms(db: Session = Depends(get_session)):
 async def start_task(body: dict, db: Session = Depends(get_session)):
     """启动抓取任务。
 
-    body: {platform, filter_id?, gear_id?, cities?, city?, salary?, table_id?, max_pages?}
+    body: {platform, filter_id?, gear_id?, cities?, city?, salary?, table_id?, max_pages?,
+           delay_min?, delay_max?}
     条件优先级:filter_id > gear_id;城市 cities(多选列表)优先于旧单值 city。
+    delay_min/delay_max: 随机间隔范围(秒,防风控),应用到本次任务翻页与详情页延迟。
     """
     platform = body.get("platform")
     if platform not in PLATFORMS:
@@ -47,6 +49,8 @@ async def start_task(body: dict, db: Session = Depends(get_session)):
             salary=body.get("salary"),
             table_id=body.get("table_id"),
             max_pages=body.get("max_pages"),
+            delay_min=body.get("delay_min"),
+            delay_max=body.get("delay_max"),
         )
     except AlreadyRunning as exc:
         raise HTTPException(409, str(exc)) from exc

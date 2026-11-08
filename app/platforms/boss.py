@@ -11,15 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import re
 from typing import AsyncIterator
 from urllib.parse import quote
 
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
-from ..config import config
-from ..utils import active_estimate_from_text, human_delay, human_scroll, save_snapshot
+from ..utils import (
+    active_estimate_from_text,
+    detail_delay,
+    human_delay,
+    human_scroll,
+    save_snapshot,
+)
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
 from .common import parse_salary_months, salary_in_range
@@ -385,10 +389,9 @@ class BossPlatform(BasePlatform):
         if params:
             u = u + ("&" if "?" in u else "?") + "&".join(params)
 
-        # 详情页节奏:随机 2~8 秒/个(可配置)。固定约 1s 的均匀高频访问
+        # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒)。固定约 1s 的均匀高频访问
         # 是 Boss 限流(code=32 访问受限)的主因,拉大并随机化间隔模拟人工浏览
-        lo, hi = config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX
-        await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+        await detail_delay(self.id)
         # 用户已请求停止:不再发起任何导航(停止指令即时生效)
         if should_stop is not None and should_stop():
             return
@@ -526,7 +529,7 @@ class BossPlatform(BasePlatform):
                         }
                 if not res.get("hasMore", True):
                     break
-                await human_delay()
+                await human_delay(self.id)
         return out
 
     # ---------- 主流程 ----------
@@ -572,7 +575,7 @@ class BossPlatform(BasePlatform):
                 if should_stop is not None and should_stop():
                     return
                 if page_num > 1:
-                    await human_delay()
+                    await human_delay(self.id)
                 if progress:
                     progress(f"接口拉取第 {page_num} 页: {keyword}@{city or '全国'}")
                 res = await self._fetch_joblist(page, keyword, city_code, page_num)
