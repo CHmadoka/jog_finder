@@ -13,6 +13,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 from typing import AsyncIterator
 from urllib.parse import quote
 
@@ -24,6 +25,8 @@ from ..utils import (
     detail_delay,
     global_nav_gate,
     human_delay,
+    human_read,
+    human_scroll,
     interruptible_sleep,
     page_responsive,
     patient_call,
@@ -32,7 +35,7 @@ from ..utils import (
     warmup,
 )
 from . import register
-from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
+from .base import AntiBot, BasePlatform, BudgetExhausted, JobDraft, LoginRequired
 from .common import parse_salary_months, salary_in_range
 from .selectors import BOSS
 
@@ -410,6 +413,16 @@ class BossPlatform(BasePlatform):
 
     # ---------- 详情 ----------
     async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None, progress=None) -> None:
+        # 会话预算:详情额度耗尽即优雅收尾(补全/修复路径无预算,不受影响)。
+        # 单登录态短时打开大量详情会显著偏离账户基线——这是 403 限流的主因之一。
+        budget = self._budget
+        if budget is not None:
+            if budget.details_left <= 0:
+                raise BudgetExhausted(
+                    f"详情页预算耗尽({budget.details} 个),任务优雅收尾:"
+                    "剩余岗位下次任务自动继续(已入库自动跳过)"
+                )
+            budget.take_detail()
         # 详情 URL 带 securityId/lid,防止 Boss 重定向到其他职位
         u = draft.url
         params = []
@@ -423,15 +436,18 @@ class BossPlatform(BasePlatform):
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒)。固定约 1s 的均匀高频访问
         # 是 Boss 限流(code=32 访问受限)的主因,拉大并随机化间隔模拟人工浏览
         await detail_delay(self.id)
-        # 批次长休息:每 8~15 个详情页插入一次 15~40 秒会话休息(防风控)
+        # 危险率长休息:模拟真人起身离开(无记忆触发,无固定批长元周期)
         await self._detail_pacer.tick(self.id, progress=progress, should_stop=should_stop)
         # 全局导航闸:多平台并发时控制叠加请求率
         await global_nav_gate()
         # 用户已请求停止:不再发起任何导航(停止指令即时生效)
         if should_stop is not None and should_stop():
             return
+        # 真人打开详情来自列表页点击:带上"列表来路" referer(100% 直达入口是强自动化签名)
+        referrer = (self._search_ctx or {}).get("referer") or self.home_url
+        t0 = time.monotonic()
         try:
-            await page.goto(u, wait_until="domcontentloaded", timeout=25000)
+            await page.goto(u, wait_until="domcontentloaded", timeout=25000, referrer=referrer)
         except Exception:  # noqa: BLE001  (超时/导航中断均由后置 URL 轮询兜底)
             pass
         # 访问受限第一时间判定:立即中止整个任务。绝不能当"岗位已下线"继续
@@ -539,6 +555,12 @@ class BossPlatform(BasePlatform):
                     save_snapshot("boss", "detail_parse_fail", (await page.content())[:200000])
                 except Exception:
                     pass
+        # 阅读仿真:停留∝描述长度(落地校验/解析耗时已计入,只补差额),
+        # 滚动浏览后再离开——零阅读访问(停留与内容无关)是强自动化签名
+        try:
+            await human_read(page, draft.description or draft.title or "", t0=t0)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def rebuild_open_params(self, page: Page, jid2kw: dict[str, str], progress=None) -> dict[str, dict]:
         """翻列表接口,为旧岗位重建 securityId/lid(防详情直链被重定向)。
@@ -592,9 +614,20 @@ class BossPlatform(BasePlatform):
         dp = detail_page
         city_code = BOSS["city_codes"].get(city, "") if city else ""
         sal_rng = (extras or {}).get("salary") or ""
+        # 任务级会话上下文:请求预算 + "列表来路"(详情 referer 模拟真人点击链)
+        budget = (extras or {}).get("budget")
+        self._budget = budget
+        self._search_ctx = {
+            "referer": "https://www.zhipin.com/web/geek/job?query="
+                       + quote(keyword or "", safe="")
+                       + (f"&city={city_code}" if city_code else "")
+        }
+        # PV 配平倒计时:每 3~6 个接口页把载体页真实导航一次(打断"纯 API 会话"形状)
+        pv_left = random.randint(3, 6)
         try:
-            # 页面仅作为 cookie 载体,保持静止:列表数据全部走页内接口 fetch,
-            # 不导航到搜索结果页(Boss 搜索页自身轮询 + 我们的 fetch 叠加易触发风控)
+            # 页面主要作为 cookie 载体:列表数据走页内接口 fetch,不长期停留在
+            # 搜索结果页(其自身轮询与我们的 fetch 叠加易触发风控);但每 3~6 页
+            # 会真实导航回首页一次做"PV 配平"(见下)
             ok_onsite, page = await self._ensure_on_domain(page)
             if not ok_onsite:
                 raise AntiBot("Boss 页面未能加载(浏览器已自动重启过),请在浏览器中手动打开 zhipin.com 后重试")
@@ -602,12 +635,18 @@ class BossPlatform(BasePlatform):
                 progress(f"接口直连采集「{keyword}」@{city or '全国'}(浏览器页面保持静止)")
             # 启动预热:静默停留 + 轻滚动,避免任务启动瞬间即高频发请求
             await warmup(page, self.id)
+            if budget is not None and budget.pages_left <= 0:
+                raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
             res = await self._fetch_joblist(page, keyword or "数据", city_code, 1)
             if not res or res.get("code") != 0:
                 raise AntiBot(
                     f"接口暂不可用(code={res.get('code') if res else '无响应'})。"
                     "可能被限流或需要完成安全验证:请在浏览器中人工检查,稍后重新开始任务"
                 )
+            if budget is not None:
+                budget.take_page()
+            # 探测页与正式第 1 页同参数(有词条时):复用结果,省一次请求与一次暴露
+            reuse_first = bool(keyword)
 
             map_ = await self._decode_map(page)
             seen: set[str] = set()
@@ -617,11 +656,32 @@ class BossPlatform(BasePlatform):
                     return
                 if page_num > 1:
                     await human_delay(self.id)
-                    # 批次长休息:每 2~4 页插入一次 15~40 秒会话休息(防风控)
+                    # 危险率长休息:模拟真人起身离开(无记忆触发,无固定批长元周期)
                     await self._page_pacer.tick(self.id, progress=progress, should_stop=should_stop)
+                    # PV 配平:每 3~6 个接口页把载体页真实导航回首页一次。真人浏览的
+                    # API 是页面浏览的副产品,"PV≈0 而接口数百次"的纯 API 会话是
+                    # 风控强判定信号;首页是"安静页"(无搜索接口轮询),不与 fetch 叠加
+                    pv_left -= 1
+                    if pv_left <= 0:
+                        pv_left = random.randint(3, 6)
+                        if progress:
+                            progress("配平会话形状:回首页浏览片刻(为接口请求伴生页面浏览)")
+                        try:
+                            await page.goto(self.home_url, wait_until="domcontentloaded", timeout=20000)
+                            await page.wait_for_timeout(random.randint(4000, 9000))
+                            await human_scroll(page, 2)
+                        except Exception:  # noqa: BLE001
+                            pass
                 if progress:
                     progress(f"接口拉取第 {page_num} 页: {keyword}@{city or '全国'}")
-                res = await self._fetch_joblist(page, keyword, city_code, page_num)
+                if page_num == 1 and reuse_first:
+                    pass                      # 复用探测页结果(同参数,不重复请求)
+                else:
+                    if budget is not None and budget.pages_left <= 0:
+                        raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
+                    res = await self._fetch_joblist(page, keyword, city_code, page_num)
+                    if budget is not None:
+                        budget.take_page()
                 if not res:
                     raise AntiBot("接口无响应(页面可能正被风控重定向),任务已暂停,请稍后重试")
                 if res.get("code") != 0:
@@ -645,6 +705,7 @@ class BossPlatform(BasePlatform):
                     if draft and draft.platform_job_id not in seen:
                         seen.add(draft.platform_job_id)
                         fresh.append(draft)
+                random.shuffle(fresh)   # 打乱列表内详情打开顺序(顺序穷举是机器签名)
                 if not fresh and progress:
                     # 不再提前停止:页与页之间常有重叠(排序微调),整页重复
                     # 不代表结果翻完;持续翻到 hasMore=False 或设定页数上限

@@ -29,6 +29,7 @@ from ..utils import (
     detail_delay,
     global_nav_gate,
     human_delay,
+    human_read,
     interruptible_sleep,
     page_responsive,
     parse_relative_time,
@@ -38,7 +39,7 @@ from ..utils import (
     warmup,
 )
 from . import register
-from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
+from .base import AntiBot, BasePlatform, BudgetExhausted, JobDraft, LoginRequired
 from .common import parse_salary_range, parse_salary_months, salary_in_range, strip_html
 from .selectors import JOB51
 
@@ -170,6 +171,30 @@ class Job51Platform(BasePlatform):
                 logger.warning("51job 接口 fetch 异常(重试 %d/2): %s", i + 1, str(exc)[:120])
                 await asyncio.sleep(1.5)
         return None
+
+    async def _fetch_via_page_pv(self, page: Page, keyword: str, area: str,
+                                 page_num: int, extras: dict | None, city: str) -> dict | None:
+        """以"真实搜索页 PV"方式取数:导航到搜索页并捕获页面自身发出的签名请求。
+
+        真人浏览的接口请求是页面浏览的副产品;"PV≈0 而接口数百次"的纯 API
+        会话形状是风控强判定信号。每 3~6 页用本方法把接口请求伴生到一次真实
+        页面浏览上(页面自己的请求天然携带合法签名与完整上下文),捕获失败
+        回退页内 fetch。
+        """
+        url = self._search_url(city, keyword, page_num, extras)
+        try:
+            async with page.expect_response(lambda r: "search-pc" in r.url, timeout=20000) as ri:
+                await global_nav_gate()
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            d = json.loads(await (await ri.value).text())
+            if str(d.get("status")) == "1":
+                return d
+            logger.warning("51job 搜索页 PV 响应异常: status=%s", d.get("status"))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("51job 搜索页 PV 取数失败(回退 fetch): %s | %s", url[:100], str(exc)[:120])
+        # PV 产生后静默停留片刻(真人浏览),再回退页内 fetch
+        await page.wait_for_timeout(random.randint(3000, 7000))
+        return await self._fetch_search(page, keyword, area, page_num)
 
     # ---------- 登录态 ----------
     async def is_logged_in(self, page: Page) -> bool:
@@ -338,16 +363,29 @@ class Job51Platform(BasePlatform):
     # ---------- 详情兜底(仅描述缺失时) ----------
     async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None, progress=None) -> None:
         """打开详情页兜底解析描述(JSON-LD + DOM);落地校验 + 风控/blank 检测。"""
+        # 会话预算:详情额度耗尽即优雅收尾(51job 常规零详情,仅兜底场景计数)
+        budget = self._budget
+        if budget is not None:
+            if budget.details_left <= 0:
+                raise BudgetExhausted(
+                    f"详情页预算耗尽({budget.details} 个),任务优雅收尾:"
+                    "剩余岗位下次任务自动继续(已入库自动跳过)"
+                )
+            budget.take_detail()
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
-        # 批次长休息:每 8~15 个详情页插入一次 15~40 秒会话休息(防风控)
+        # 危险率长休息:模拟真人起身离开(无记忆触发,无固定批长元周期)
         await self._detail_pacer.tick(self.id, progress=progress, should_stop=should_stop)
         # 全局导航闸:多平台并发时控制叠加请求率
         await global_nav_gate()
         if should_stop is not None and should_stop():
             return
+        # 真人打开详情来自列表页点击:带上"列表来路" referer(直达入口是强自动化签名)
+        referrer = (self._search_ctx or {}).get("referer") or self.home_url
+        t0 = _time.monotonic()
         try:
-            await page.goto(draft.url or self.home_url, wait_until="domcontentloaded", timeout=25000)
+            await page.goto(draft.url or self.home_url, wait_until="domcontentloaded",
+                            timeout=25000, referrer=referrer)
         except Exception:  # noqa: BLE001
             pass
         # 静默观察落地(意外等待不刷新页面):每轮静默 5~10 秒后检查一次,3 轮不落地才定论
@@ -418,6 +456,18 @@ class Job51Platform(BasePlatform):
                     draft.title = ((await el.text_content()) or "").strip()
             except Exception:  # noqa: BLE001
                 pass
+        # 阅读仿真:停留∝描述长度(落地校验/解析耗时已计入,只补差额),
+        # 滚动浏览后再离开——零阅读访问(停留与内容无关)是强自动化签名
+        try:
+            await human_read(page, draft.description or draft.title or "", t0=t0)
+        except Exception:  # noqa: BLE001
+            pass
+        # 阅读仿真:停留∝描述长度(落地校验/解析耗时已计入,只补差额),
+        # 滚动浏览后再离开——零阅读访问(停留与内容无关)是强自动化签名
+        try:
+            await human_read(page, draft.description or draft.title or "", t0=t0)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- 主流程 ----------
     async def iter_jobs(
@@ -439,6 +489,12 @@ class Job51Platform(BasePlatform):
         dp = detail_page
         area = JOB51["city_codes"].get(city, JOB51["city_codes"]["全国"]) if city else JOB51["city_codes"]["全国"]
         sal_rng = (extras or {}).get("salary") or ""
+        # 任务级会话上下文:请求预算 + "列表来路"(详情 referer 模拟真人点击链)
+        budget = (extras or {}).get("budget")
+        self._budget = budget
+        self._search_ctx: dict = {}
+        # PV 配平倒计时:每 3~6 个接口页以"真实搜索页导航"取数一次(见 _fetch_via_page_pv)
+        pv_left = random.randint(3, 6)
         try:
             # 载体页策略:
             # - 冷启动(页面不在 we.51job.com):goto 搜索页,并捕获页面自身发出的
@@ -488,13 +544,24 @@ class Job51Platform(BasePlatform):
                 page_num += 1
                 if should_stop is not None and should_stop():
                     return
+                # 详情 referer 跟随当前页对应搜索列表;页预算耗尽即优雅收尾
+                self._search_ctx["referer"] = self._search_url(city, keyword, page_num, extras)
+                if budget is not None and budget.pages_left <= 0:
+                    raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
                 if progress:
                     progress(f"接口拉取第 {page_num} 页: {keyword}@{city or '全国'}")
                 if page_num == 1 and first_page_data is not None:
                     data = first_page_data
                     first_page_data = None
                 else:
-                    data = await self._fetch_search(page, keyword, area, page_num)
+                    # PV 配平:每 3~6 页以"真实搜索页导航+捕获页面自身签名请求"取数,
+                    # 让接口请求伴生页面浏览(打断纯 API 会话形状);失败自动回退 fetch
+                    pv_left -= 1
+                    if pv_left <= 0:
+                        pv_left = random.randint(3, 6)
+                        data = await self._fetch_via_page_pv(page, keyword, area, page_num, extras, city)
+                    else:
+                        data = await self._fetch_search(page, keyword, area, page_num)
                 if not (data and str(data.get("status")) == "1"):
                     fail_streak += 1
                     msg = (data or {}).get("message") or ("非JSON响应" if data is None else f"status={data.get('status')}")
@@ -511,6 +578,8 @@ class Job51Platform(BasePlatform):
                     page_num -= 1  # 重试当前页
                     continue
                 fail_streak = 0
+                if budget is not None:
+                    budget.take_page()
                 job = ((data.get("resultbody") or {}).get("job") or {})
                 items = job.get("items") or []
                 try:
@@ -541,6 +610,7 @@ class Job51Platform(BasePlatform):
                     if draft and draft.platform_job_id not in seen:
                         seen.add(draft.platform_job_id)
                         fresh.append(draft)
+                random.shuffle(fresh)   # 打乱列表内处理顺序(顺序穷举是机器签名)
                 if not fresh and progress:
                     # 不提前停止:整页重复≠结果翻完(排序微调常致页间重叠),
                     # 持续翻到 totalcount 耗尽或页数上限(手动/异常中断除外)

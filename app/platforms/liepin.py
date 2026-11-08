@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
+import time
 from datetime import datetime
 from typing import AsyncIterator
 from urllib.parse import quote
@@ -31,6 +33,7 @@ from ..utils import (
     fmt_dt,
     global_nav_gate,
     human_delay,
+    human_read,
     human_scroll,
     page_responsive,
     parse_relative_time,
@@ -40,7 +43,7 @@ from ..utils import (
     warmup,
 )
 from . import register
-from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
+from .base import AntiBot, BasePlatform, BudgetExhausted, JobDraft, LoginRequired
 from .common import deep_find_list, parse_salary_months, salary_in_range, strip_html
 from .selectors import LIEPIN
 
@@ -306,19 +309,33 @@ class LiepinPlatform(BasePlatform):
         return drafts
 
     # ---------- 详情解析 ----------
-    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
+    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None, progress=None) -> None:
         """详情页:JSON-LD(schema.org JobPosting)优先,DOM 兜底;落地校验+风控/blank 检测。"""
+        # 会话预算:详情额度耗尽即优雅收尾(猎聘每岗必开详情,预算是关键约束)。
+        # 单登录态短时打开大量详情会显著偏离账户基线——短时触发短信验证的主因。
+        budget = self._budget
+        if budget is not None:
+            if budget.details_left <= 0:
+                raise BudgetExhausted(
+                    f"详情页预算耗尽({budget.details} 个),任务优雅收尾:"
+                    "剩余岗位下次任务自动继续(已入库自动跳过)"
+                )
+            budget.take_detail()
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
-        # 批次长休息:每 8~15 个详情页插入一次 15~40 秒会话休息——猎聘每岗必开
-        # 详情,单页 40 条连续导航是短时触发人机验证的主因,批次休息是关键防线
+        # 危险率长休息:模拟真人起身离开(无记忆触发,无固定批长元周期)——
+        # 猎聘每岗必开详情,单页 40 条连续导航是短时触发人机验证的主因
         await self._detail_pacer.tick(self.id, progress=progress, should_stop=should_stop)
         # 全局导航闸:多平台并发时控制叠加请求率
         await global_nav_gate()
         if should_stop is not None and should_stop():
             return
+        # 真人打开详情来自列表页点击:带上"列表来路" referer(直达入口是强自动化签名)
+        referrer = (self._search_ctx or {}).get("referer") or self.home_url
+        t0 = time.monotonic()
         try:
-            await page.goto(draft.url or self.home_url, wait_until="domcontentloaded", timeout=25000)
+            await page.goto(draft.url or self.home_url, wait_until="domcontentloaded",
+                            timeout=25000, referrer=referrer)
         except Exception:  # noqa: BLE001
             pass
         # 落地校验:URL 需包含岗位 ID(防平台重定向)
@@ -394,6 +411,12 @@ class LiepinPlatform(BasePlatform):
             draft.raw.setdefault("_warnings", []).append(
                 "猎聘详情页未解析到职位描述(页面结构可能已变化)"
             )
+        # 阅读仿真:停留∝描述长度(落地校验/解析耗时已计入,只补差额),
+        # 滚动浏览后再离开——零阅读访问(停留与内容无关)是强自动化签名
+        try:
+            await human_read(page, draft.description or draft.title or "", t0=t0)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- 主流程 ----------
     async def iter_jobs(
@@ -413,6 +436,10 @@ class LiepinPlatform(BasePlatform):
         own_detail = detail_page is None
         dp = detail_page
         sal_rng = (extras or {}).get("salary") or ""
+        # 任务级会话上下文:请求预算 + "列表来路"(详情 referer 模拟真人点击链)
+        budget = (extras or {}).get("budget")
+        self._budget = budget
+        self._search_ctx = {"referer": self._search_url(city, keyword, 1)}
         try:
             seen: set[str] = set()
             # 启动预热:载体页静默停留 + 轻滚动,避免任务启动瞬间即高频发请求
@@ -421,6 +448,9 @@ class LiepinPlatform(BasePlatform):
                 if should_stop is not None and should_stop():
                     return
                 url = self._search_url(city, keyword, page_num)
+                self._search_ctx["referer"] = url    # 详情 referer 跟随当前列表页
+                if budget is not None and budget.pages_left <= 0:
+                    raise BudgetExhausted(f"列表页预算耗尽({budget.pages} 页),任务优雅收尾")
                 if progress:
                     progress(f"打开第 {page_num} 页: {keyword}@{city or '全国'}")
                 # 导航驱动 + 响应监听:页面自己发的签名请求,捕获响应拿结构化数据。
@@ -465,9 +495,12 @@ class LiepinPlatform(BasePlatform):
                 else:
                     await self._wait_list(page)
                     drafts = await self._parse_list_dom(page, city, warn)
+                if budget is not None:
+                    budget.take_page()
                 fresh = [d for d in drafts if d.platform_job_id and d.platform_job_id not in seen]
                 for d in drafts:
                     seen.add(d.platform_job_id)
+                random.shuffle(fresh)   # 打乱列表内详情打开顺序(顺序穷举是机器签名)
                 if not fresh and progress:
                     # 不提前停止:整页重复≠结果翻完(排序微调常致页间重叠),
                     # 持续翻到设定页数上限为止(手动/异常中断除外)
@@ -491,7 +524,7 @@ class LiepinPlatform(BasePlatform):
                     if draft.url:
                         if dp is None:
                             dp = await page.context.new_page()
-                        await self._parse_detail(dp, draft, should_stop=should_stop)
+                        await self._parse_detail(dp, draft, should_stop=should_stop, progress=progress)
                     yield draft
                 if sal_filtered and progress:
                     progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")
@@ -503,7 +536,7 @@ class LiepinPlatform(BasePlatform):
                 if page_num < max_pages:
                     await human_scroll(page)
                     await human_delay(self.id)
-                    # 批次长休息:每 2~4 页插入一次 15~40 秒会话休息(防风控)
+                    # 危险率长休息:模拟真人起身离开(无记忆触发,无固定批长元周期)
                     await self._page_pacer.tick(self.id, progress=progress, should_stop=should_stop)
         finally:
             if own_detail and dp is not None:

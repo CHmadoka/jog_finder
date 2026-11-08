@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
@@ -17,14 +18,34 @@ from ..filter import evaluate_job
 from ..models import AppEvent, CrawlTask, Gear, Job, JobTable, SearchFilter, SessionLocal
 from ..models import now_local
 from ..platforms import all_platforms, get_platform
-from ..platforms.base import AntiBot, JobDraft, LoginRequired, WarnCallback
-from ..utils import is_verify_wait
+from ..platforms.base import AntiBot, BudgetExhausted, JobDraft, LoginRequired, WarnCallback
+from ..utils import SessionBudget, is_verify_wait
 
 logger = logging.getLogger(__name__)
 
 
 class AlreadyRunning(Exception):
     """该平台已有任务在运行。"""
+
+
+# 触发后降档的判定关键词:与 runner/适配器写入异常面板的风控类消息对齐
+_RISK_MSG_KEYS = ("风控", "访问受限", "安全验证")
+
+
+def _db_count_recent_risk(platform: str, hours: int = 24) -> int:
+    """近 N 小时该平台的风控事件数(触发后降档依据)。
+
+    平台风控是累积风险分:刚触发过验证/限流的账号被重点观察,立即恢复
+    高频极易二次触发。按事件面板中含风控关键词的记录计数。
+    """
+    cutoff = now_local() - timedelta(hours=hours)
+    with SessionLocal() as db:
+        rows = (
+            db.query(AppEvent.message)
+            .filter(AppEvent.platform == platform, AppEvent.created_at >= cutoff)
+            .all()
+        )
+    return sum(1 for (m,) in rows if any(k in (m or "") for k in _RISK_MSG_KEYS))
 
 
 # ---------- 独立的同步 DB 帮助函数(供 to_thread 调用) ----------
@@ -473,6 +494,24 @@ class Scheduler:
             "delay_min": delay_lo, "delay_max": delay_hi,
         }
 
+        # 触发后降档:平台风控是累积风险分,刚触发过的会话被重点观察。
+        # 近 24h 风控事件 → 会话预算按次数折减;≥3 次拒绝启动(建议冷却 48h)。
+        risk_hits = await asyncio.to_thread(_db_count_recent_risk, platform)
+        if risk_hits >= 3:
+            raise ValueError(
+                f"{plat.name} 近 24 小时已触发 {risk_hits} 次风控,账户风险分较高,"
+                "建议冷却 48 小时后再抓取;确需立即重试,请先在异常面板清除对应记录"
+            )
+        budget_scale = {0: 1.0, 1: 0.5, 2: 0.25}[min(risk_hits, 2)]
+        budget = SessionBudget(
+            pages=max(int(config.SESSION_PAGE_BUDGET * budget_scale), 4),
+            details=max(int(config.SESSION_DETAIL_BUDGET * budget_scale), 6),
+            label=plat.name,
+        )
+        if budget_scale < 1.0:
+            snapshot["budget_scale"] = budget_scale
+            snapshot["risk_hits_24h"] = risk_hits
+
         task_id = await asyncio.to_thread(_db_create_task, platform, snapshot, table_id)
 
         self._stops[platform] = asyncio.Event()
@@ -480,7 +519,7 @@ class Scheduler:
         self._counters[platform] = {"found": 0, "saved": 0, "skipped": 0, "skip_stats": {}}
         self._running_task_ids[platform] = task_id
         self._tasks[platform] = asyncio.create_task(
-            self._run(plat, task_id, snapshot), name=f"crawl-{platform}"
+            self._run(plat, task_id, snapshot, budget), name=f"crawl-{platform}"
         )
         return task_id
 
@@ -493,6 +532,9 @@ class Scheduler:
         if self.is_running(platform):
             raise AlreadyRunning(f"平台 {platform} 已有任务在运行(每平台仅允许一个)")
         plat = get_platform(platform)
+        # 清空上一任务遗留的会话上下文(预算/列表来路):补全路径不受预算约束
+        plat._budget = None
+        plat._search_ctx = {}
         self._stops[platform] = asyncio.Event()
         self._progress[platform] = "补全启动中..."
         self._counters[platform] = {"found": 0, "saved": 0, "skipped": 0}
@@ -633,7 +675,7 @@ class Scheduler:
             logger.info("补全任务结束: %s - %s", status, message)
 
     # ---------- 任务体 ----------
-    async def _run(self, plat, task_id: int, snap: dict) -> None:
+    async def _run(self, plat, task_id: int, snap: dict, budget: SessionBudget | None = None) -> None:
         platform = plat.id
         stop = self._stops[platform]
         counters = self._counters[platform]
@@ -651,6 +693,14 @@ class Scheduler:
             snap.get("delay_max") if snap.get("delay_max") is not None else config.DELAY_MAX,
         )
         progress(f"防风控随机间隔:{delay_lo:g}~{delay_hi:g} 秒")
+        # 会话预算经 extras 注入适配器(适配器在 iter_jobs 里读取并按页/岗计数;
+        # 对象不进快照/DB,只随本任务内存传递)。触发过风控时预算已按次数折减。
+        if budget is not None:
+            snap.setdefault("extras", {})["budget"] = budget
+            progress(
+                f"单会话安全预算:列表页 ≤{budget.pages} 页、详情页 ≤{budget.details} 个"
+                "(达限优雅收尾,剩余岗位下次任务自动继续)"
+            )
 
         status, message = "done", ""
         skip_stats: dict[str, int] = {}
@@ -698,6 +748,9 @@ class Scheduler:
             if not cities and snap.get("city"):
                 cities = [c.strip() for c in str(snap["city"]).split(",") if c.strip()]
             combos = [(kw, c) for kw in kw_list for c in (cities or [""])]
+            # 打乱词条×城市遍历顺序:有序笛卡尔积穷举是机器签名,真人检索是乱序、
+            # 跨域、非完备的(打乱不影响覆盖:全部组合仍会被处理)
+            random.shuffle(combos)
             total = len(combos)
             # 组合进度(状态卡悬停展开显示):每组合 {kw, city, state: pending/running/done}
             combo_items = [{"kw": kw, "city": c, "state": "pending"} for (kw, c) in combos]
@@ -763,6 +816,11 @@ class Scheduler:
                 [{"message": f"任务{task_id}中断: {message}", "url": plat.home_url}],
                 level="error",
             )
+        except BudgetExhausted as exc:
+            # 预算耗尽是"优雅收尾"而非错误:按 done 收尾,已抓数据完整保留;
+            # 未处理岗位下次任务自动继续(已入库自动跳过,重复成本为零)
+            status, message = "done", f"已达单会话安全预算,任务收尾: {exc}"
+            progress(message)
         except AntiBot as exc:
             if stop.is_set():
                 # 等待人工验证等环节因用户停止而抛出:按手动停止收尾,不报错不弹窗

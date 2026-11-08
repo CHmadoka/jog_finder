@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -57,16 +59,38 @@ def is_verify_wait(platform: str) -> bool:
     return _VERIFY_WAIT.get(platform, False)
 
 
+def _human_gap(lo: float, hi: float) -> float:
+    """人类化间隔采样:对数正态(重尾)+ 偶发长尾,替代 uniform 平顶分布。
+
+    uniform(lo, hi) 的直方图是平顶——统计上与真人的重尾分布截然不同
+    (KS 检验/熵检验一测即中,"随机等待"本身反成自动化签名)。对数正态以
+    几何中位数 sqrt(lo*hi) 为中心,天然产生"多数靠近下限(快速连续操作)
+    + 少量拖尾(阅读/离开)"的人类形状;6% 概率注入超出 hi 的长尾
+    (真人会中途离开片刻),上限钳制 90 秒。
+    """
+    lo, hi = (lo, hi) if lo <= hi else (hi, lo)
+    lo = max(lo, 0.2)
+    if hi <= lo * 1.05:                     # 区间退化:无可分布性,仅加微抖动
+        return lo + random.uniform(0, max(hi - lo, 0.2))
+    med = math.sqrt(lo * hi)
+    # sigma 使约 10% 样本低于 lo(钳回 lo,形成"反应下限"点质量,非平顶)
+    sigma = min(0.5, max(0.25, abs(math.log(hi / lo)) / 2 / 1.28))
+    gap = min(max(random.lognormvariate(math.log(med), sigma), lo), hi)
+    if random.random() < 0.06:              # 偶发长尾:读长内容/离开片刻
+        gap = random.uniform(hi, min(hi * 4, 90.0))
+    return gap
+
+
 async def human_delay(platform: str | None = None) -> None:
     """页面动作间的随机延迟,模拟人工节奏(任务级覆盖 > config 默认)。"""
     lo, hi = _RUNTIME_DELAYS.get(platform) or (config.DELAY_MIN, config.DELAY_MAX)
-    await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+    await asyncio.sleep(_human_gap(lo, max(lo, hi)))
 
 
 async def detail_delay(platform: str | None = None) -> None:
     """详情页访问间的随机延迟,模拟人工浏览(任务级覆盖 > config 默认)。"""
     lo, hi = _RUNTIME_DELAYS.get(platform) or (config.DETAIL_DELAY_MIN, config.DETAIL_DELAY_MAX)
-    await asyncio.sleep(random.uniform(lo, max(lo, hi)))
+    await asyncio.sleep(_human_gap(lo, max(lo, hi)))
 
 
 # ---------- 意外等待的静默重试 ----------
@@ -126,30 +150,72 @@ async def global_nav_gate() -> None:
 
 
 class SessionPacer:
-    """会话节奏器:在常规随机间隔之外,每处理一批(页/岗位)插入一次长休息。
+    """会话节奏器:在常规随机间隔之外,以"危险率"模型插入长休息。
 
-    恒定短节奏(即使带随机)持续数十次仍会被平台统计识别——真人会中途离开/
-    阅读。批次大小与休息时长均随机;批次未耗尽时 tick 直接返回不休息。
-    计数跨任务累计(每次任务开始不重置):只会更保守,无副作用。
+    真人何时起身离开近似无记忆(几何分布):每页/每岗以固定概率触发一次
+    休息,而非固定批长——固定批长(每 N 个一次)会形成可统计的元周期。
+    休息时长对数正态采样,偶发超长离开。计数跨任务累计(每次任务开始
+    不重置):只会更保守,无副作用。
     """
 
     def __init__(self, *, batch: tuple[int, int] = (2, 4), idle: tuple[float, float] = (15, 40),
                  label: str = "翻页") -> None:
-        self.batch = batch
+        mean_batch = max((batch[0] + batch[1]) / 2, 1.0)
+        self._hazard = 1.0 / mean_batch        # 每 tick 触发休息的概率(无记忆)
         self.idle = idle
         self.label = label
-        self._left = random.randint(*batch)
 
     async def tick(self, platform: str, progress=None, should_stop=None) -> None:
-        """每完成一页/一个岗位调用一次;批次耗尽时插入一次长休息(可被停止打断)。"""
-        self._left -= 1
-        if self._left > 0:
+        """每完成一页/一个岗位调用一次;按危险率随机触发一次长休息(可被停止打断)。"""
+        if random.random() >= self._hazard:
             return
-        self._left = random.randint(*self.batch)
-        wait = random.uniform(*self.idle)
+        lo, hi = self.idle
+        wait = min(
+            max(random.lognormvariate(math.log((lo + hi) / 2), 0.5), lo),
+            min(hi * 3, 120.0),
+        )
         if progress:
-            progress(f"防风控会话休息 {wait:.0f} 秒({self.label}批次完成,模拟真人离开后返回)")
+            progress(f"防风控会话休息 {wait:.0f} 秒({self.label}间隙,模拟真人离开后返回)")
         await interruptible_sleep(wait, should_stop)
+
+
+class SessionBudget:
+    """单会话(任务)请求预算:列表页/详情页计数,达限即让任务优雅收尾。
+
+    平台风控对"账号基线偏离"高度敏感:单登录态短时间请求成百上千次,
+    无论间隔多随机都显著偏离该账号的历史分位(真人日浏览量有限)。
+    预算把"一次抓完"改为"分批像人一样抓"——达限即优雅收尾,未处理岗位
+    下次任务自动继续(已入库岗位自动跳过,重复成本为零)。
+    """
+
+    def __init__(self, *, pages: int, details: int, label: str = "") -> None:
+        self.pages = max(int(pages), 1)
+        self.details = max(int(details), 1)
+        self.label = label
+        self.used_pages = 0
+        self.used_details = 0
+
+    @property
+    def pages_left(self) -> int:
+        return max(self.pages - self.used_pages, 0)
+
+    @property
+    def details_left(self) -> int:
+        return max(self.details - self.used_details, 0)
+
+    def take_page(self) -> bool:
+        """占用一个列表页额度;耗尽返回 False(调用方应停止翻页)。"""
+        if self.used_pages >= self.pages:
+            return False
+        self.used_pages += 1
+        return True
+
+    def take_detail(self) -> bool:
+        """占用一个详情页额度;耗尽返回 False(调用方应停止打开详情)。"""
+        if self.used_details >= self.details:
+            return False
+        self.used_details += 1
+        return True
 
 
 async def warmup(page, platform: str) -> None:
@@ -221,10 +287,47 @@ async def human_type(page, selector: str, text: str) -> None:
 
 
 async def human_scroll(page, times: int = 3) -> None:
-    """随机滚动,触发懒加载并模拟真人浏览。"""
+    """随机滚动,触发懒加载并模拟真人浏览。
+
+    wheel 前先产生一段 mousemove 轨迹(多步插值移动):没有轨迹历史的
+    受信滚轮事件是可被识别的自动化签名。大概率向下浏览,偶尔回看上文。
+    """
     for _ in range(times):
-        await page.mouse.wheel(0, random.randint(300, 900))
+        try:
+            x = random.uniform(120, 800)
+            y = random.uniform(120, 480)
+            await page.mouse.move(x, y, steps=random.randint(4, 10))
+            await asyncio.sleep(random.uniform(0.08, 0.35))
+            await page.mouse.move(
+                x + random.uniform(-120, 120), y + random.uniform(40, 220),
+                steps=random.randint(3, 8),
+            )
+            dy = random.randint(300, 900) if random.random() < 0.8 else -random.randint(120, 400)
+            await page.mouse.wheel(0, dy)
+        except Exception:  # noqa: BLE001  (页面导航瞬间输入域可能异常,不阻断)
+            pass
         await asyncio.sleep(random.uniform(0.4, 1.2))
+
+
+async def human_read(page, text: str, *, t0: float | None = None) -> None:
+    """详情页阅读仿真:停留时长∝内容长度(对数正态),期间穿插滚动。
+
+    "落地即抽 DOM 立即离开"是零阅读访问——服务器可见的页面停留与内容
+    长度完全无关,属强自动化签名。t0 传页面到达时刻(time.monotonic()):
+    落地校验/解析耗时计入停留,只补足差额,不为凑时长空转(效率优先)。
+    """
+    n = len((text or "").strip())
+    base = 3.0 + math.log1p(max(n, 0)) * 1.2      # 0字≈3s,1千字≈11s,6千字≈22s
+    dwell = min(max(random.lognormvariate(math.log(base), 0.45), 4.0), 24.0)
+    start = t0 if t0 is not None else time.monotonic()
+    remain = dwell - (time.monotonic() - start)
+    if remain <= 0.3:
+        return
+    rounds = random.randint(2, 4)
+    per = remain / rounds
+    for _ in range(rounds):
+        await human_scroll(page, 1)
+        await asyncio.sleep(max(per - 0.9, 0.05))
 
 
 def save_snapshot(platform: str, name: str, html: str) -> Path:
