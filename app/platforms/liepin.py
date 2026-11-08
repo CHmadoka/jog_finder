@@ -25,13 +25,17 @@ from urllib.parse import quote
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from ..utils import (
+    RETRY_ATTEMPTS,
     active_estimate_from_text,
     detail_delay,
     fmt_dt,
     human_delay,
     human_scroll,
+    page_responsive,
     parse_relative_time,
+    patient_poll,
     save_snapshot,
+    silent_backoff,
 )
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
@@ -311,19 +315,21 @@ class LiepinPlatform(BasePlatform):
         except Exception:  # noqa: BLE001
             pass
         # 落地校验:URL 需包含岗位 ID(防平台重定向)
-        landed = False
-        for _ in range(8):
-            if should_stop is not None and should_stop():
-                return
-            if draft.platform_job_id in (page.url or ""):
-                landed = True
-                break
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=1500)
-            except Exception:  # noqa: BLE001
-                pass
-            await asyncio.sleep(0.5)
+        # 静默观察落地(意外等待不刷新页面):每轮静默 5~10 秒后检查一次,3 轮不落地才定论
+        landed = draft.platform_job_id in (page.url or "")
         if not landed:
+            async def _landed() -> bool:
+                return draft.platform_job_id in (page.url or "")
+            landed = await patient_poll(_landed, should_stop=should_stop)
+        if not landed:
+            # 静默观察 3 轮仍不落地,分级处理:
+            # - 页面无响应/被清空 → 风控未识别或中断,自动中止任务(防止对异常状态连发);
+            # - 平台正常响应但岗位失效(重定向)→ 视为已下线,跳过。
+            if "about:blank" in (page.url or "") or not await page_responsive(page):
+                raise AntiBot(
+                    f"猎聘详情页无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未落地): {draft.title}。"
+                    "任务已自动中止,请人工检查浏览器后重试"
+                )
             # 单次导航即定论,不做二次硬闯(反复刷新加重风控)
             logger.warning("猎聘详情落地异常(视为已下线,跳过): %s -> %s", draft.title, (page.url or "")[:120])
             draft.raw["offline"] = True
@@ -408,27 +414,42 @@ class LiepinPlatform(BasePlatform):
                 url = self._search_url(city, keyword, page_num)
                 if progress:
                     progress(f"打开第 {page_num} 页: {keyword}@{city or '全国'}")
-                # 导航驱动 + 响应监听:页面自己发的签名请求,捕获响应拿结构化数据
+                # 导航驱动 + 响应监听:页面自己发的签名请求,捕获响应拿结构化数据。
+                # 意外等待静默重试:捕获失败(超时/中断)不立即放弃——静默 5~10 秒
+                # (不反复刷新)后重试同一页,最多 3 次;仍失败交 DOM 兜底
                 data = None
-                try:
-                    async with page.expect_response(
-                        lambda r: "pc-search-job" in r.url and "cond-init" not in r.url,
-                        timeout=20000,
-                    ) as ri:
-                        try:
-                            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                        except PWTimeout:
-                            pass
-                        resp = await ri.value
-                        body = await resp.text()
-                    d = json.loads(body)
-                    if d.get("flag") == 1:
-                        data = d
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("猎聘响应捕获失败(走DOM兜底): %s", str(exc)[:120])
+                for attempt in range(1, RETRY_ATTEMPTS + 1):
+                    try:
+                        async with page.expect_response(
+                            lambda r: "pc-search-job" in r.url and "cond-init" not in r.url,
+                            timeout=20000,
+                        ) as ri:
+                            try:
+                                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                            except PWTimeout:
+                                pass
+                            resp = await ri.value
+                            body = await resp.text()
+                        d = json.loads(body)
+                        if d.get("flag") == 1:
+                            data = d
+                        break   # flag!=1 是接口拒绝:不重试连发,交 DOM 兜底
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("猎聘响应捕获失败(第 %d/3 次): %s", attempt, str(exc)[:120])
+                    if attempt < RETRY_ATTEMPTS and not (should_stop is not None and should_stop()):
+                        if progress:
+                            progress(f"页面响应异常,静默等待后重试({attempt}/{RETRY_ATTEMPTS},不反复刷新)")
+                        await silent_backoff()
                 if re.search(r"/login|passport", (page.url or "")):
                     raise LoginRequired("猎聘跳转到登录页")
                 await self._raise_if_verify(page)
+                if data is None and not await page_responsive(page):
+                    # 3 次静默重试仍捕获失败,且页面无响应:风控未识别或页面中断,
+                    # 自动中止任务(防止对异常状态连发导航)
+                    raise AntiBot(
+                        f"猎聘页面无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未恢复): {keyword}@{city or '全国'}。"
+                        "任务已自动中止,请人工检查浏览器后重试"
+                    )
                 if data is not None:                    drafts = await self._parse_list_json(data, city, warn)
                 else:
                     await self._wait_list(page)

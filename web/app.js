@@ -74,12 +74,14 @@ const CityPicker = {
   props: {
     modelValue: { type: Array, default: () => [] },
     placeholder: { type: String, default: "选择省 → 市后添加" },
+    disabled: { type: Boolean, default: false },   // 任务运行中抓取卡只读
   },
   emits: ["update:modelValue"],
   setup(props, { emit }) {
     const options = window.CN_PROVINCE_CITIES || [];
     const picked = Vue.ref([]);
     function onChange(vals) {
+      if (props.disabled) return;
       const v = Array.isArray(vals) ? vals[vals.length - 1] : "";
       if (v && !props.modelValue.includes(v)) {
         emit("update:modelValue", [...props.modelValue, v]);
@@ -87,6 +89,7 @@ const CityPicker = {
       picked.value = [];   // 添加后即清空选择器,便于继续选下一个城市
     }
     function remove(i) {
+      if (props.disabled) return;
       emit("update:modelValue", props.modelValue.filter((_, idx) => idx !== i));
     }
     return { options, picked, onChange, remove };
@@ -95,10 +98,10 @@ const CityPicker = {
     <div class="kw-editor city-editor">
       <el-cascader v-model="picked" :options="options" :props="{ expandTrigger: 'hover' }"
                    size="small" :placeholder="placeholder" :show-all-levels="false" clearable
-                   @change="onChange"></el-cascader>
+                   :disabled="disabled" @change="onChange"></el-cascader>
       <div class="kw-tags city-tags">
         <template v-if="modelValue.length">
-          <el-tag v-for="(c, i) in modelValue" :key="c + i" size="small" effect="plain" closable
+          <el-tag v-for="(c, i) in modelValue" :key="c + i" size="small" effect="plain" :closable="!disabled"
                   @close="remove(i)">{{ c }}</el-tag>
         </template>
         <span v-else class="tags-empty">尚未选择城市</span>

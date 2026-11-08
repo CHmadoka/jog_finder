@@ -24,11 +24,15 @@ from urllib.parse import quote, urlencode
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from ..utils import (
+    RETRY_ATTEMPTS,
     detail_delay,
     human_delay,
     human_scroll,
+    page_responsive,
     parse_relative_time,
+    patient_poll,
     save_snapshot,
+    silent_backoff,
 )
 from . import register
 from .base import AntiBot, BasePlatform, JobDraft, LoginRequired
@@ -306,20 +310,21 @@ class Job51Platform(BasePlatform):
             await page.goto(draft.url or self.home_url, wait_until="domcontentloaded", timeout=25000)
         except Exception:  # noqa: BLE001
             pass
-        # 落地校验:URL 需包含岗位 ID(防平台重定向到别的岗位)
-        landed = False
-        for _ in range(8):
-            if should_stop is not None and should_stop():
-                return
-            if draft.platform_job_id in (page.url or ""):
-                landed = True
-                break
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=1500)
-            except Exception:  # noqa: BLE001
-                pass
-            await asyncio.sleep(0.5)
+        # 静默观察落地(意外等待不刷新页面):每轮静默 5~10 秒后检查一次,3 轮不落地才定论
+        landed = draft.platform_job_id in (page.url or "")
         if not landed:
+            async def _landed() -> bool:
+                return draft.platform_job_id in (page.url or "")
+            landed = await patient_poll(_landed, should_stop=should_stop)
+        if not landed:
+            # 静默观察 3 轮仍不落地,分级处理:
+            # - 页面无响应/被清空 → 风控未识别或中断,自动中止任务(防止对异常状态连发);
+            # - 平台正常响应但岗位失效(重定向)→ 视为已下线,跳过。
+            if "about:blank" in (page.url or "") or not await page_responsive(page):
+                raise AntiBot(
+                    f"详情页无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未落地): {draft.title}。"
+                    "可能存在未识别的风控或页面中断,任务已自动中止,请人工检查浏览器后重试"
+                )
             # 单次导航即定论,不做二次硬闯(反复刷新加重风控)
             logger.warning("51job 详情落地异常(视为已下线,跳过): %s -> %s", draft.title, (page.url or "")[:120])
             draft.raw["offline"] = True
@@ -453,13 +458,14 @@ class Job51Platform(BasePlatform):
                     msg = (data or {}).get("message") or ("非JSON响应" if data is None else f"status={data.get('status')}")
                     logger.warning("51job 接口异常: %s | 页面URL: %s", msg, (page.url or "")[:120])
                     if progress:
-                        progress(f"接口异常({msg}),第 {fail_streak}/2 次")
-                    if fail_streak >= 2:
+                        progress(f"接口异常({msg}),静默等待后重试,第 {fail_streak}/{RETRY_ATTEMPTS} 次")
+                    if fail_streak >= RETRY_ATTEMPTS:
                         raise AntiBot(
-                            f"前程无忧接口连续失败({msg}),任务已暂停。"
+                            f"前程无忧接口连续 {RETRY_ATTEMPTS} 次失败({msg}),任务已自动中止。"
                             "可能被限流或需要安全验证:请在浏览器中人工检查后重新开始任务"
                         )
-                    await human_delay(self.id)
+                    # 意外等待静默退避(不刷新页面):5~10 秒后重试当前页
+                    await silent_backoff()
                     page_num -= 1  # 重试当前页
                     continue
                 fail_streak = 0
@@ -475,8 +481,8 @@ class Job51Platform(BasePlatform):
                     if total and total > (page_num - 1) * 50 and not retried_empty:
                         retried_empty = True
                         if progress:
-                            progress(f"第 {page_num} 页异常为空(接口 total={total}),等待后重试")
-                        await human_delay(self.id)
+                            progress(f"第 {page_num} 页异常为空(接口 total={total}),静默等待后重试")
+                        await silent_backoff()
                         page_num -= 1  # 重试当前页
                         continue
                     if progress:

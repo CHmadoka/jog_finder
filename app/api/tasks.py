@@ -75,7 +75,9 @@ async def check_login(body: dict):
 
     plat = get_platform(platform)
     try:
-        await browser_manager.ensure()
+        # 冷启动首屏直接用该平台首页:ensure() 无参时首屏硬编码 zhipin.com,
+        # 会导致"点前程无忧抓取,浏览器先打开 Boss"的怪象
+        await browser_manager.ensure(plat.home_url)
         page = await browser_manager.get_or_open_page(
             plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
         )

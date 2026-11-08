@@ -191,6 +191,8 @@
       cursor: pointer; color: var(--text2); transition: all .15s; user-select: none;
     }
     .seg-item.active { background: #fff; color: var(--el-color-primary); font-weight: 600; box-shadow: 0 1px 3px rgba(16,24,40,.08); }
+    /* 任务运行中抓取卡只读:模式切换段禁用态 */
+    .seg-item.disabled { opacity: .45; pointer-events: none; }
 
     .field-label { font-size: 12px; color: var(--text3); margin: 10px 0 4px; }
     .field-label .link { float: right; }
@@ -639,7 +641,7 @@
         <!-- 存入目标表:抓取结果固定写入该表,与右栏浏览的工作表筛选分离 -->
         <div class="field-label">存入数据表</div>
         <div class="table-combo" style="width:100%">
-          <el-select v-model="grab.table_id" style="flex:1; min-width:0">
+          <el-select v-model="grab.table_id" style="flex:1; min-width:0" :disabled="running">
             <el-option v-for="t in tables" :key="t.id" :value="t.id" :label="t.name"></el-option>
           </el-select>
           <el-tooltip content="管理数据表(新建 / 重命名 / 清空 / 删除)" placement="top">
@@ -653,23 +655,25 @@
         <div class="field-label" style="display:flex; align-items:center;">
           <span style="flex:1">随机间隔(秒)</span>
           <el-tooltip content="恢复默认 3~8 秒" placement="top">
-            <el-button size="small" text class="delay-reset" @click="resetDelay">复位</el-button>
+            <el-button size="small" text class="delay-reset" :disabled="running" @click="resetDelay">复位</el-button>
           </el-tooltip>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
           <el-input-number v-model="grab.delay_min" :min="0.5" :max="60" :step="0.5" :precision="1"
-                           :controls="false" style="flex:1" @change="normalizeDelay"></el-input-number>
+                           :controls="false" style="flex:1" :disabled="running" @change="normalizeDelay"></el-input-number>
           <span style="color:var(--text3)">-</span>
           <el-input-number v-model="grab.delay_max" :min="0.5" :max="60" :step="0.5" :precision="1"
-                           :controls="false" style="flex:1" @change="normalizeDelay"></el-input-number>
+                           :controls="false" style="flex:1" :disabled="running" @change="normalizeDelay"></el-input-number>
         </div>
         <div v-if="delayRisk" class="delay-risk">
           ⚠ 风控建议:间隔低于 2 秒请求过密,极易触发平台风控(验证码/限流/封号),建议保持 3~8 秒
         </div>
 
         <div class="seg" style="margin-top:8px;">
-          <div class="seg-item" :class="{ active: grab.mode === 'quick' }" @click="grab.mode = 'quick'">快速抓取</div>
-          <div class="seg-item" :class="{ active: grab.mode === 'saved' }" @click="switchMode('saved')">已存条件</div>
+          <div class="seg-item" :class="{ active: grab.mode === 'quick', disabled: running }"
+               @click="!running && (grab.mode = 'quick')">快速抓取</div>
+          <div class="seg-item" :class="{ active: grab.mode === 'saved', disabled: running }"
+               @click="!running && switchMode('saved')">已存条件</div>
         </div>
 
         <!-- 模式内容区按内容自适应高度(标签区各自限高内部滚动):
@@ -677,7 +681,7 @@
         <template v-if="grab.mode === 'quick'">
           <div class="field-label">岗位设置</div>
           <div class="table-combo" style="width:100%">
-            <el-select v-model="grab.gear_id" placeholder="选择设置" filterable
+            <el-select v-model="grab.gear_id" placeholder="选择设置" filterable :disabled="running"
                        style="flex:1; min-width:0">
               <el-option v-for="g in gears" :key="g.id" :value="g.id"
                          :label="g.name + ' · ' + (g.keywords || []).length + ' 个词条'">
@@ -691,17 +695,17 @@
           </div>
 
           <div class="field-label">城市(可多选,留空 = 全国)</div>
-          <city-picker v-model="grab.cities"></city-picker>
+          <city-picker v-model="grab.cities" :disabled="running"></city-picker>
 
           <div class="field-label">每词条最多翻页数</div>
-          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
+          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" :disabled="running"></el-input-number>
         </template>
 
         <!-- 已存条件:管理入口与快速抓取的岗位设置一致(组合框内齿轮按钮) -->
         <template v-else>
           <div class="field-label">选择条件</div>
           <div class="table-combo" style="width:100%">
-            <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="flex:1; min-width:0">
+            <el-select v-model="grab.filter_id" placeholder="选择已保存的筛选条件" style="flex:1; min-width:0" :disabled="running">
               <el-option v-for="f in filters" :key="f.id" :value="f.id" :label="f.name"></el-option>
             </el-select>
             <el-tooltip content="管理筛选条件(新建 / 编辑 / 删除)" placement="top">
@@ -709,17 +713,17 @@
             </el-tooltip>
           </div>
           <div class="field-label">每词条最多翻页数</div>
-          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%"></el-input-number>
+          <el-input-number v-model="grab.max_pages" :min="1" :max="20" style="width:100%" :disabled="running"></el-input-number>
         </template>
 
         <!-- 两种模式共用:薪资范围(双输入,橙色K后缀;两端留空即不限) -->
         <div class="field-label">薪资范围(K/月)</div>
         <div style="display:flex; gap:6px; align-items:center;">
-          <el-input v-model="grab.salary_min" placeholder="最低" clearable inputmode="decimal">
+          <el-input v-model="grab.salary_min" placeholder="最低" clearable inputmode="decimal" :disabled="running">
             <template #suffix><span class="k-unit">K</span></template>
           </el-input>
           <span style="color:var(--text3)">-</span>
-          <el-input v-model="grab.salary_max" placeholder="最高" clearable inputmode="decimal">
+          <el-input v-model="grab.salary_max" placeholder="最高" clearable inputmode="decimal" :disabled="running">
             <template #suffix><span class="k-unit">K</span></template>
           </el-input>
         </div>

@@ -427,7 +427,8 @@ class BrowserManager:
         except Exception:  # noqa: BLE001
             return res
         try:
-            await self.ensure()
+            # 冷启动首屏直接用该平台首页(ensure() 无参时首屏硬编码 zhipin.com)
+            await self.ensure(plat.home_url)
             page = await self.get_or_open_page(
                 plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
             )

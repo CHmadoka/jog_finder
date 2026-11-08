@@ -18,10 +18,14 @@ from urllib.parse import quote
 from playwright.async_api import Page, TimeoutError as PWTimeout
 
 from ..utils import (
+    RETRY_ATTEMPTS,
     active_estimate_from_text,
     detail_delay,
     human_delay,
     human_scroll,
+    page_responsive,
+    patient_call,
+    patient_poll,
     save_snapshot,
 )
 from . import register
@@ -161,27 +165,28 @@ class BossPlatform(BasePlatform):
         """页内 fetch 接口拿列表数据。
 
         - 页面内 JSON.stringify 返回 str,Playwright evaluate 拿到的也是 str,需 json.loads;
-        - 只容忍"页面正在导航"的瞬态异常(最多 2 次);
+        - 意外等待静默重试:瞬态异常(页面正在导航等)静默等待 5~10 秒后原样重试,
+          最多 3 次(全程不刷新页面),3 次仍失败返回 {} 由调用方按接口不可用中止;
         - **接口返回拒绝码(code!=0)绝不重试连发**——那正是触发 _security_check
           风控重定向循环的原因,由调用方按错误类型处理。
         """
         import json as _json
 
-        for i in range(3):
-            try:
-                raw = await page.evaluate(self._joblist_js(query, city, page_num))
-                if isinstance(raw, str):
-                    raw = _json.loads(raw)
-                if isinstance(raw, dict) and raw.get("code") is not None:
-                    return raw
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Boss joblist fetch 异常(重试 %d/3): %s", i + 1, str(exc)[:120])
-                try:
-                    await page.wait_for_load_state("domcontentloaded", timeout=4000)
-                except Exception:  # noqa: BLE001
-                    pass
-                await asyncio.sleep(1.5)
-        return {}
+        async def _once():
+            raw = await page.evaluate(self._joblist_js(query, city, page_num))
+            if isinstance(raw, str):
+                raw = _json.loads(raw)
+            if isinstance(raw, dict) and raw.get("code") is not None:
+                return raw     # 含拒绝码:如实返回(不重试),由调用方判定
+            raise RuntimeError(f"响应结构异常: {type(raw).__name__}")
+
+        ok, raw = await patient_call(_once)
+        if not ok:
+            logger.warning(
+                "Boss joblist fetch 静默重试 %d 次仍失败: %s", RETRY_ATTEMPTS, str(raw)[:120]
+            )
+            return {}
+        return raw
 
     async def _decode_map(self, page: Page) -> dict:
         try:
@@ -402,21 +407,17 @@ class BossPlatform(BasePlatform):
         # 访问受限第一时间判定:立即中止整个任务。绝不能当"岗位已下线"继续
         # 下一条——那会对受限页连续导航几十次(实测被限流后每 5 秒撞一次)
         await self._raise_if_restricted(page)
-        # 轮询等待落地页稳定(跳转链较慢,最多 ~8s):URL 需包含 jobId
-        landed = False
-        for _ in range(8):
-            if should_stop is not None and should_stop():
-                return
-            if draft.platform_job_id in page.url:
-                landed = True
-                break
+        # 静默观察落地(意外等待不刷新页面):每轮静默 5~10 秒后检查一次,
+        # 3 轮不落地才定论;受限特征命中时立即中止任务
+        landed = draft.platform_job_id in page.url
+
+        async def _landed() -> bool:
             if self._is_restricted_url(page.url or ""):
                 raise AntiBot(_RESTRICTED_MSG)
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=1500)
-            except Exception:  # noqa: BLE001
-                pass
-            await asyncio.sleep(0.5)
+            return draft.platform_job_id in page.url
+
+        if not landed:
+            landed = await patient_poll(_landed, should_stop=should_stop)
         if not landed:
             # 正文型受限页(URL 未变)兜底判定,再走原验证页判定
             await self._raise_if_restricted(page)
@@ -424,7 +425,15 @@ class BossPlatform(BasePlatform):
                 await self._wait_manual_verify(page, progress=None)
                 landed = draft.platform_job_id in page.url
         if not landed:
-            # 不做二次硬闯:单次导航即定论,避免同一页面反复刷新加重风控
+            # 静默观察 3 轮仍不落地,分级处理:
+            # - 页面无响应/被清空 → 风控未识别或中断,自动中止任务(防止对异常状态连发);
+            # - 平台正常响应但岗位失效(重定向到列表/首页)→ 视为已下线,跳过。
+            # 全程不做二次导航硬闯(反复刷新加重风控)
+            if "about:blank" in (page.url or "") or not await page_responsive(page):
+                raise AntiBot(
+                    f"详情页无响应(静默重试 {RETRY_ATTEMPTS} 次后仍未落地): {draft.title}。"
+                    "可能存在未识别的风控或页面中断,任务已自动中止,请人工检查浏览器后重试"
+                )
             logger.warning("Boss 详情落地页异常(视为已下线,跳过): %s -> %s", draft.title, page.url[:120])
             draft.raw["offline"] = True
             return

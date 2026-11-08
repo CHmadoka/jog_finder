@@ -507,7 +507,9 @@ class Scheduler:
                 message = "没有需要补全的岗位(活跃字段均已存在)"
                 progress(message)
                 return
-            await browser_manager.ensure()
+            # 冷启动首屏直接用该平台首页(ensure() 无参时首屏硬编码 zhipin.com,
+            # 抓其他平台会先误开 Boss)
+            await browser_manager.ensure(plat.home_url)
             page = await browser_manager.get_or_open_page(
                 plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
             )
@@ -650,7 +652,9 @@ class Scheduler:
                 progress(f"⚠ 记录 {n} 条字段解析异常(见左下角异常面板,可点击跳转)")
 
         try:
-            browser = await browser_manager.ensure()
+            # 冷启动首屏直接用该平台首页(ensure() 无参时首屏硬编码 zhipin.com,
+            # 抓其他平台会先误开 Boss)
+            browser = await browser_manager.ensure(plat.home_url)
             page = await browser_manager.get_or_open_page(
                 plat.home_prefix, plat.home_url, avoid_marker=plat.detail_url_marker
             )

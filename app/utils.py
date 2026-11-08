@@ -55,6 +55,69 @@ async def detail_delay(platform: str | None = None) -> None:
     await asyncio.sleep(random.uniform(lo, max(lo, hi)))
 
 
+# ---------- 意外等待的静默重试 ----------
+# 节奏约定(全平台统一):意外等待(风控未识别/中断/无响应)期间**不反复刷新页面**,
+# 每超过 5 秒即附加 0~5 秒随机静默后再尝试一次;连续 3 次失败自动中止任务。
+RETRY_UNIT = 5.0
+RETRY_ATTEMPTS = 3
+
+
+async def silent_backoff(unit: float = RETRY_UNIT) -> None:
+    """静默退避等待:unit 秒观察 + rand(0, unit) 秒随机静默(全程不做任何导航/刷新)。"""
+    await asyncio.sleep(unit + random.uniform(0, unit))
+
+
+async def patient_poll(
+    check, *, rounds: int = RETRY_ATTEMPTS, unit: float = RETRY_UNIT, should_stop=None
+) -> bool:
+    """静默观察式等待(不刷新页面):每轮静默等待 5~10 秒后执行一次 check()。
+
+    check() 返回真值 → 立即成功返回 True;check() 抛出的异常原样向上传播
+    (如风控判定需立即中止任务)。rounds 轮全失败 → 返回 False,由调用方决定中止或跳过。
+    """
+    for _ in range(rounds):
+        if should_stop is not None and should_stop():
+            return False
+        await silent_backoff(unit)
+        if await check():
+            return True
+    return False
+
+
+async def patient_call(
+    op, *, attempts: int = RETRY_ATTEMPTS, unit: float = RETRY_UNIT
+) -> tuple[bool, object]:
+    """静默重试(不刷新页面):单次操作失败后静默等待 5~10 秒再试同一操作。
+
+    返回 (True, 结果) 或 (False, 最后一次异常)。op 的业务性"拒绝"
+    (如接口返回拒绝码)应作为正常返回值交给调用方判定,不走重试(避免连发)。
+    """
+    last: object = None
+    for i in range(attempts):
+        try:
+            return True, await op()
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if i < attempts - 1:
+                await silent_backoff(unit)
+    return False, last
+
+
+async def page_responsive(page) -> bool:
+    """页面是否仍可正常响应(标题非空且脚本可执行)。
+
+    用于区分"平台正常响应但岗位失效"(重定向到列表/首页,可跳过)与
+    "页面无响应/被反自动化清空"(风控未识别或中断,应中止任务)。
+    """
+    try:
+        if not ((await page.title()) or "").strip():
+            return False
+        await page.evaluate("() => 1")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def human_type(page, selector: str, text: str) -> None:
     """模拟真人输入:逐字延迟。"""
     await page.click(selector)
