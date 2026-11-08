@@ -646,6 +646,9 @@ class Job51Platform(BasePlatform):
                         progress(f"已覆盖全部 {total} 条结果,提前结束翻页")
                     break
                 if page_num < max_pages:
+                    # 翻页间先滚动浏览列表再等待:真人在搜索结果页会滚动看内容,
+                    # "XHR→XHR 零页面行为"的纯接口节奏是需要仿真的缺口
+                    await human_scroll(page, random.randint(1, 2))
                     await human_delay(self.id)
                     # 批次长休息:每 2~4 页插入一次 15~40 秒会话休息(防风控)
                     await self._page_pacer.tick(self.id, progress=progress, should_stop=should_stop)
