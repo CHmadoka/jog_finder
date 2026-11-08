@@ -43,6 +43,20 @@ def clear_runtime_delay(platform: str) -> None:
     _RUNTIME_DELAYS.pop(platform, None)
 
 
+# ---------- 人工验证等待标志 ----------
+# 平台进入"等待人工完成验证"循环时置 True,退出(通过/停止/中止)置 False。
+# 调度器 /tasks/status 透出 verify_wait,前端据此弹强提醒(上升沿一次)。
+_VERIFY_WAIT: dict[str, bool] = {}
+
+
+def set_verify_wait(platform: str, waiting: bool) -> None:
+    _VERIFY_WAIT[platform] = waiting
+
+
+def is_verify_wait(platform: str) -> bool:
+    return _VERIFY_WAIT.get(platform, False)
+
+
 async def human_delay(platform: str | None = None) -> None:
     """页面动作间的随机延迟,模拟人工节奏(任务级覆盖 > config 默认)。"""
     lo, hi = _RUNTIME_DELAYS.get(platform) or (config.DELAY_MIN, config.DELAY_MAX)

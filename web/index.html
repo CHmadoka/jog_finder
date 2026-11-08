@@ -596,7 +596,9 @@
         <span class="ts-name">{{ platformOf(seg.pid) }}</span>
         <span class="ts-idle" v-if="!seg.status.running">空闲</span>
         <template v-if="seg.status.running">
-          <span class="ts-progress" :title="seg.status.progress">{{ seg.status.progress || '正在准备…' }}</span>
+          <span class="ts-progress" :title="seg.status.progress">
+            <template v-if="seg.status.stopping">⏹ 停止中·</template>{{ seg.status.progress || '正在准备…' }}
+          </span>
           <span class="ts-counters" v-if="seg.status.counters">
             <span class="tsc">发现 {{ seg.status.counters.found || 0 }}</span>
             <span class="tsc save">入库 {{ seg.status.counters.saved || 0 }}</span>
@@ -734,9 +736,9 @@
                     :content="'结果存入数据表「' + currentTableName + '」' + (!canStart ? ' · ' + startHint : '')">
           <span class="grab-btn-wrap">
             <el-button :type="running ? 'warning' : 'primary'" size="large"
-                       :disabled="!running && !canStart" :loading="starting"
+                       :disabled="(!running && !canStart) || stopping" :loading="starting"
                        @click="running ? stopTask() : startTask()">
-              {{ running ? '停止抓取' : (canStart ? '开始抓取' : startHint) }}
+              {{ stopping ? '停止中…' : (running ? '停止抓取' : (canStart ? '开始抓取' : startHint)) }}
             </el-button>
           </span>
         </el-tooltip>
@@ -755,14 +757,17 @@
                    :srcset="platformLogo(t.platform).srcset" alt="" @error="onLogoError(t.platform)">
               <template v-else>{{ platformLogo(t.platform).text }}</template>
             </span>
-            <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status) }}</el-tag>
-            <!-- 结束的任务:结构化小标签(词条/城市/入库占比);运行中:进度文本 -->
+            <el-tag size="small" effect="light" :type="taskTagType(t.status)">{{ taskText(t.status, t.platform) }}</el-tag>
+            <!-- 结束的任务:结构化小标签(词条/城市/入库占比);运行中:进度文本;
+                 停止指令已发出但任务未退出 → "正在停止"过渡文案(而非"抓取中") -->
             <span class="task-stats" v-if="t.status !== 'running'" :title="t.message">
               <span class="stat-tag">{{ kwCount(t) }}词条</span>
               <span class="stat-tag">{{ cityLabel(t) }}</span>
               <span class="stat-tag save">{{ t.saved }}/{{ t.found }}入库</span>
             </span>
-            <span class="task-msg" v-else :title="t.message">{{ t.message || '抓取中…' }}</span>
+            <span class="task-msg" v-else :title="t.message">
+              {{ isStopping(t.platform) ? '正在停止,等待当前操作结束…' : (t.message || '抓取中…') }}
+            </span>
             <span class="task-time">{{ t.status === 'done' || t.status === 'error' || t.status === 'stopped' ? fmtDate(t.finished_at || t.started_at) : '进行中' }}</span>
           </div>
           <div class="empty-tip" v-if="!recentTasks.length">暂无任务记录</div>
@@ -797,8 +802,8 @@
           <el-select v-model="query.task_id" placeholder="按任务过滤" clearable filterable
                      style="width:180px" @change="onTaskPick">
             <el-option v-for="t in taskOptions" :key="t.id" :value="t.id"
-                       :label="'#' + t.id + ' ' + taskText(t.status) + ' ' + fmtDate(t.started_at)">
-              <span>#{{ t.id }} {{ taskText(t.status) }}</span>
+                       :label="'#' + t.id + ' ' + taskText(t.status, t.platform) + ' ' + fmtDate(t.started_at)">
+              <span>#{{ t.id }} {{ taskText(t.status, t.platform) }}</span>
               <span style="float:right; color:#9aa0aa; font-size:12px">{{ fmtDate(t.started_at) }} {{ (t.keywords || '').split('|')[0] }}@{{ fmtCities(t.city) }}</span>
             </el-option>
           </el-select>
@@ -968,7 +973,7 @@
         <el-descriptions-item label="任务编号">#{{ detailTask.id }}</el-descriptions-item>
         <el-descriptions-item label="平台">{{ platformOf(detailTask.platform) }}</el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag size="small" effect="light" :type="taskTagType(detailTask.status)">{{ taskText(detailTask.status) }}</el-tag>
+          <el-tag size="small" effect="light" :type="taskTagType(detailTask.status)">{{ taskText(detailTask.status, detailTask.platform) }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="开始时间">{{ fmtTime(detailTask.started_at) }}</el-descriptions-item>
         <el-descriptions-item label="完成时间">{{ detailTask.finished_at ? fmtTime(detailTask.finished_at) : '—(中断/中止)' }}</el-descriptions-item>
@@ -1008,7 +1013,7 @@
       <el-table-column prop="id" label="#" width="56"></el-table-column>
       <el-table-column label="状态" width="84">
         <template #default="{ row }">
-          <el-tag size="small" effect="light" :type="taskTagType(row.status)">{{ taskText(row.status) }}</el-tag>
+          <el-tag size="small" effect="light" :type="taskTagType(row.status)">{{ taskText(row.status, row.platform) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="词条@城市" min-width="160" show-overflow-tooltip>

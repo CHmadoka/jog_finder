@@ -314,17 +314,32 @@ class BossPlatform(BasePlatform):
         except Exception:
             return "verify" in page.url
 
-    async def _wait_manual_verify(self, page: Page, progress) -> None:
-        """检测到安全验证:立即中止任务(对齐实例的人工处理模式)。
+    async def _wait_manual_verify(self, page: Page, progress=None, should_stop=None) -> None:
+        """普通人机验证(滑块/验证码):强提醒 + 持续静默等待人工完成。
 
-        不做 120 秒等待重试——Boss 验证页会反复自动刷新,观感差且持续暴露请求。
-        用户在浏览器里完成验证后重新开始任务即可;已抓岗位由查重跳过,零浪费。
+        每 5 秒**只读**轮询一次页面是否已通过验证(读取 URL/标题/DOM,不产生任何
+        平台请求),绝不刷新页面、绝不重新导航;验证通过后任务自动继续。
+        用户点「停止抓取」可随时退出等待(调度器按手动停止收尾,不报错)。
         """
-        if progress:
-            progress("触发安全验证,任务已暂停。请在浏览器完成验证后重新点击\"开始抓取\"续跑")
-        raise AntiBot(
-            "触发安全验证,任务已暂停。请在浏览器中完成滑块/验证码后重新开始任务(已抓岗位自动跳过)"
-        )
+        from ..utils import set_verify_wait
+        set_verify_wait(self.id, True)
+        try:
+            if progress:
+                progress("⚠ 触发人机验证,已暂停等待人工完成:请在浏览器窗口完成滑块/验证码,"
+                         "通过后任务自动继续(每 5 秒检测一次,不会刷新页面)")
+            while True:
+                if should_stop is not None and should_stop():
+                    raise AntiBot("等待人工验证期间用户停止任务")
+                await asyncio.sleep(5)
+                try:
+                    if not await self._is_verify_page(page):
+                        if progress:
+                            progress("人工验证已通过,继续抓取")
+                        return
+                except Exception:  # noqa: BLE001  (渲染中的瞬态异常:继续静默观察)
+                    pass
+        finally:
+            set_verify_wait(self.id, False)
 
     # ---------- 列表(接口直连) ----------
     def _draft_from_api(self, x: dict, map_: dict, city: str) -> tuple[JobDraft | None, list[str]]:
@@ -383,7 +398,7 @@ class BossPlatform(BasePlatform):
         ), warns
 
     # ---------- 详情 ----------
-    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
+    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None, progress=None) -> None:
         # 详情 URL 带 securityId/lid,防止 Boss 重定向到其他职位
         u = draft.url
         params = []
@@ -422,7 +437,7 @@ class BossPlatform(BasePlatform):
             # 正文型受限页(URL 未变)兜底判定,再走原验证页判定
             await self._raise_if_restricted(page)
             if await self._is_verify_page(page):
-                await self._wait_manual_verify(page, progress=None)
+                await self._wait_manual_verify(page, progress=progress, should_stop=should_stop)
                 landed = draft.platform_job_id in page.url
         if not landed:
             # 静默观察 3 轮仍不落地,分级处理:
@@ -461,7 +476,7 @@ class BossPlatform(BasePlatform):
             return
         await self._raise_if_restricted(page)
         if await self._is_verify_page(page):
-            await self._wait_manual_verify(page, progress=None)
+            await self._wait_manual_verify(page, progress=progress, should_stop=should_stop)
         try:
             data = await page.evaluate(
                 """() => ({
@@ -598,7 +613,7 @@ class BossPlatform(BasePlatform):
                         "请在浏览器中人工检查(可能需要完成安全验证)后重新开始任务"
                     )
                 if await self._is_verify_page(page):
-                    await self._wait_manual_verify(page, progress)
+                    await self._wait_manual_verify(page, progress=progress, should_stop=should_stop)
                     res = await self._fetch_joblist(page, keyword, city_code, page_num)
                 fresh = []
                 for x in res.get("list") or []:
@@ -638,7 +653,7 @@ class BossPlatform(BasePlatform):
                         return
                     if dp is None:
                         dp = await page.context.new_page()
-                    await self._parse_detail(dp, draft, should_stop=should_stop)
+                    await self._parse_detail(dp, draft, should_stop=should_stop, progress=progress)
                     yield draft
                 if sal_filtered and progress:
                     progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")

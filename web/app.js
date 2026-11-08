@@ -6,7 +6,7 @@
  * 3. 启动前置校验:条件不完整时按钮禁用并给出明确原因。
  */
 const { createApp, reactive, ref, computed, onMounted, onUnmounted, watch } = Vue;
-const { ElMessage, ElMessageBox } = ElementPlus;
+const { ElMessage, ElMessageBox, ElNotification } = ElementPlus;
 
 const PLATFORM_NAMES = { boss: "Boss直聘", job51: "前程无忧", liepin: "猎聘" };
 // 平台徽标(顶栏切换按钮/任务行小徽标):三家官方应用图标(1024px 无损源图)已放进 web/
@@ -172,6 +172,11 @@ const app = createApp({
     // ---------- 计算属性 ----------
     const currentStatus = computed(() => statuses[grab.platform] || {});
     const running = computed(() => !!currentStatus.value.running);
+    // 停止指令已发出、任务尚未退出的过渡态:按钮立即切"停止中…"并禁用,
+    // 消除"点了没反应"的误判(适配器需等当前导航/静默等待到检查点才退出)
+    const stopping = computed(() => !!currentStatus.value.stopping);
+    // 任意平台任务行的停止中判断(最近任务列表渲染用)
+    const isStopping = (pid) => !!(statuses[pid] || {}).stopping;
 
     const canStart = computed(() => {
       if (grab.mode === "saved") return !!grab.filter_id;
@@ -330,7 +335,9 @@ const app = createApp({
       const n = cityCount(t);
       return n ? n + "城市" : "全国";
     }
-    function taskText(s) {
+    function taskText(s, platform) {
+      // 运行中的任务行:停止指令已发出、任务尚未退出 → 显示"停止中"过渡态
+      if (s === "running" && platform && (statuses[platform] || {}).stopping) return "停止中";
       return { done: "完成", running: "进行中", stopped: "已停止", error: "失败" }[s] || s;
     }
     // 任务详情卡片
@@ -507,8 +514,19 @@ const app = createApp({
             // 任务由运行转为结束:异常中断时弹窗告知原因(风控/访问受限等)
             if (v.last && v.last.status === "error") notifyInterrupted(pid, v.last);
           }
+          // 人机验证强提醒:verify_wait 上升沿弹一次(不自动关闭,需手动关),
+          // 平台在浏览器中暂停等待人工完成验证,期间不刷新页面不发起请求
+          if (v.verify_wait && !statuses[pid + "_vw"]) {
+            ElNotification({
+              title: "人机验证等待中",
+              message: `${platformOf(pid)} 触发人机验证,任务已暂停:请在浏览器窗口完成滑块/验证码,`
+                     + `通过后任务自动继续(每 5 秒只读检测,不会刷新页面、不会发起请求)`,
+              type: "warning", duration: 0,
+            });
+          }
           statuses[pid] = v;
           statuses[pid + "_was"] = v.running;
+          statuses[pid + "_vw"] = !!v.verify_wait;
         }
         if (ended) { reloadJobs(); loadTasks(); loadPlatforms(); loadEvents(); loadTaskOptions(); }
         // 运行中每 15 秒轻量刷新一次数据,让新入库岗位及时可见
@@ -1023,7 +1041,7 @@ const app = createApp({
       jobKeywords, hitKeywords, highlightedDesc, highlightedTitle,
       comboHover,
       gearForm, filterForm, tableForm,
-      currentStatus, running, canStart, startHint, delayRisk, normalizeDelay, resetDelay,
+      currentStatus, running, stopping, isStopping, canStart, startHint, delayRisk, normalizeDelay, resetDelay,
       sortState, skipTipOf, currentTableName, brandBg,
       platformOf, gearName, isRunning, taskStatusOf, fmtTime, fmtDate, fmtSalaryRange, fmtCities, taskTagType, taskText,
       kwCount, cityLabel, statusSegments,

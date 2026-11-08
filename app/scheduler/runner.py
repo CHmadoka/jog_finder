@@ -18,6 +18,7 @@ from ..models import AppEvent, CrawlTask, Gear, Job, JobTable, SearchFilter, Ses
 from ..models import now_local
 from ..platforms import all_platforms, get_platform
 from ..platforms.base import AntiBot, JobDraft, LoginRequired, WarnCallback
+from ..utils import is_verify_wait
 
 logger = logging.getLogger(__name__)
 
@@ -353,17 +354,26 @@ class Scheduler:
         """
         out: dict[str, dict] = {}
         for p in all_platforms():
+            stop_ev = self._stops.get(p.id)
             entry = {
                 "running": False,
                 "progress": self._progress.get(p.id, ""),
                 "counters": self._counters.get(p.id, {}),
+                # stopping:停止指令已发出、任务尚未退出的过渡态(适配器要等当前
+                # 导航/静默等待到检查点才退出)。前端据此立即把按钮切为"停止中…",
+                # 避免误判为"点了没反应";任务行同步显示"停止中"而非"进行中"。
+                # verify_wait:平台正处于"等待人工完成验证"循环(前端弹强提醒)。
+                # 两者对全部平台统一计算(空闲平台 _stops 无 event / 标志 False)。
+                "stopping": bool(stop_ev and stop_ev.is_set()),
+                "verify_wait": is_verify_wait(p.id),
             }
             last = self._last_result.get(p.id)
             if last:
                 entry["last"] = last
             out[p.id] = entry
         for pid, task in self._tasks.items():
-            entry = out.setdefault(pid, {"running": False, "progress": "", "counters": {}})
+            entry = out.setdefault(pid, {"running": False, "progress": "", "counters": {},
+                                          "stopping": False, "verify_wait": False})
             entry["running"] = not task.done()
             entry["progress"] = self._progress.get(pid, "")
             entry["counters"] = self._counters.get(pid, {})
@@ -548,9 +558,13 @@ class Scheduler:
                     },
                 )
                 try:
-                    await plat._parse_detail(dp, draft, should_stop=stop.is_set)
+                    await plat._parse_detail(dp, draft, should_stop=stop.is_set, progress=progress)
                 except AntiBot as exc:
-                    status, message = "error", f"触发风控: {exc}"
+                    if stop.is_set():
+                        # 等待人工验证等环节因用户停止而抛出:按手动停止收尾
+                        status, message = "stopped", "用户手动停止"
+                    else:
+                        status, message = "error", f"触发风控: {exc}"
                     break
                 except LoginRequired as exc:
                     status, message = "error", str(exc)
@@ -750,13 +764,17 @@ class Scheduler:
                 level="error",
             )
         except AntiBot as exc:
-            status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
-            # 风控中断同样落异常面板:任务结束即弹窗提示,面板提供可追溯记录
-            await asyncio.to_thread(
-                _db_add_events, platform,
-                [{"message": f"任务{task_id}风控中断: {message}", "url": plat.home_url}],
-                level="error",
-            )
+            if stop.is_set():
+                # 等待人工验证等环节因用户停止而抛出:按手动停止收尾,不报错不弹窗
+                status, message = "stopped", "用户手动停止"
+            else:
+                status, message = "error", f"触发平台风控: {exc}(请稍后在浏览器中人工验证后重试)"
+                # 风控中断同样落异常面板:任务结束即弹窗提示,面板提供可追溯记录
+                await asyncio.to_thread(
+                    _db_add_events, platform,
+                    [{"message": f"任务{task_id}风控中断: {message}", "url": plat.home_url}],
+                    level="error",
+                )
         except Exception as exc:  # noqa: BLE001
             logger.exception("抓取任务异常")
             status, message = "error", f"{type(exc).__name__}: {exc}"

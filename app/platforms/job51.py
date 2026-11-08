@@ -91,7 +91,10 @@ def _salary_from_ld(sal) -> str:
 _DETAIL_DOM_RE = ".job_msg, .bmsg, .jdesc, .cn, [class*='job'] [class*='desc']"
 # 验证页特征(URL/文本;文案含 51job 通用风控提示)
 _VERIFY_RE = re.compile(r"verify|captcha|validate", re.I)
-_VERIFY_TEXT_RE = re.compile(r"安全验证|拖动滑块|完成验证|人机验证|账号行为异常|安全中心")
+# Access Verification:前程无忧人机验证页标题/正文实测特征(2026-11)
+_VERIFY_TEXT_RE = re.compile(
+    r"安全验证|拖动滑块|完成验证|人机验证|账号行为异常|安全中心|access\s*verification", re.I
+)
 
 
 class Job51Platform(BasePlatform):
@@ -215,12 +218,34 @@ class Job51Platform(BasePlatform):
         except Exception:
             return False
 
-    async def _raise_if_verify(self, page: Page) -> None:
-        if await self._is_verify_page(page):
-            raise AntiBot(
-                "前程无忧触发安全验证,任务已暂停。请在浏览器中完成验证后重新开始任务"
-                "(已抓岗位自动跳过)"
-            )
+    async def _wait_if_verify(self, page: Page, progress=None, should_stop=None) -> None:
+        """检测到人机验证(Access Verification/安全验证):强提醒 + 持续静默等待。
+
+        未检测到验证页直接返回;检测到则每 5 秒**只读**轮询(读 URL/标题/DOM,
+        不产生任何平台请求),绝不刷新页面、绝不重新导航;通过后任务自动继续。
+        用户点「停止抓取」可随时退出等待(调度器按手动停止收尾,不报错)。
+        """
+        if not await self._is_verify_page(page):
+            return
+        from ..utils import set_verify_wait
+        set_verify_wait(self.id, True)
+        try:
+            if progress:
+                progress("⚠ 前程无忧触发人机验证(Access Verification),已暂停等待人工完成:"
+                         "请在浏览器窗口完成验证,通过后任务自动继续(每 5 秒检测,不会刷新页面)")
+            while True:
+                if should_stop is not None and should_stop():
+                    raise AntiBot("等待人工验证期间用户停止任务")
+                await asyncio.sleep(5)
+                try:
+                    if not await self._is_verify_page(page):
+                        if progress:
+                            progress("人工验证已通过,继续抓取")
+                        return
+                except Exception:  # noqa: BLE001  (渲染中的瞬态异常:继续静默观察)
+                    pass
+        finally:
+            set_verify_wait(self.id, False)
 
     # ---------- 搜索 ----------
     def _search_url(self, city: str, keyword: str, page_num: int, extras: dict | None = None) -> str:
@@ -300,7 +325,7 @@ class Job51Platform(BasePlatform):
         return draft, warns
 
     # ---------- 详情兜底(仅描述缺失时) ----------
-    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None) -> None:
+    async def _parse_detail(self, page: Page, draft: JobDraft, should_stop=None, progress=None) -> None:
         """打开详情页兜底解析描述(JSON-LD + DOM);落地校验 + 风控/blank 检测。"""
         # 详情页节奏:随机间隔(任务级设置,默认 3~8 秒),模拟人工浏览
         await detail_delay(self.id)
@@ -333,7 +358,7 @@ class Job51Platform(BasePlatform):
             logger.warning("51job 详情页被清空(反自动化拦截): %s", draft.title)
             draft.raw["blanked"] = True
             return
-        await self._raise_if_verify(page)
+        await self._wait_if_verify(page, progress=progress, should_stop=should_stop)
         await page.wait_for_timeout(1500)
         # JSON-LD
         try:
@@ -435,7 +460,7 @@ class Job51Platform(BasePlatform):
                 )
             if "passport.51job.com" in (page.url or "") or re.search(r"/login", (page.url or "")):
                 raise LoginRequired("51job 搜索页跳转到登录页")
-            await self._raise_if_verify(page)
+            await self._wait_if_verify(page, progress=progress, should_stop=should_stop)
 
             seen: set[str] = set()
             total: int | None = None
@@ -537,7 +562,7 @@ class Job51Platform(BasePlatform):
                     if not (draft.description or "").strip() and draft.url:
                         if dp is None:
                             dp = await page.context.new_page()
-                        await self._parse_detail(dp, draft, should_stop=should_stop)
+                        await self._parse_detail(dp, draft, should_stop=should_stop, progress=progress)
                     yield draft
                 if sal_filtered and progress:
                     progress(f"第 {page_num} 页有 {sal_filtered} 个岗位薪资范围外,已过滤")
